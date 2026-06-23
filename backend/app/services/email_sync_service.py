@@ -1,6 +1,7 @@
 import base64
 from email.utils import parsedate_to_datetime
 
+from bs4 import BeautifulSoup
 from sqlalchemy.orm import Session
 
 from backend.app.models.email import Email
@@ -13,33 +14,35 @@ from backend.app.services.google_token_service import (
 
 class EmailSyncService:
 
+    MAX_EMAIL_LENGTH = 4000
+
     @staticmethod
     async def sync_emails(
-    db: Session,
-    user: User,
-    days: int = 7,
-) -> int:
+        db: Session,
+        user: User,
+        days: int = 7,
+    ) -> int:
 
         access_token = (
-        await GoogleTokenService.refresh_access_token(
-            user=user,
-            db=db,
+            await GoogleTokenService.refresh_access_token(
+                user=user,
+                db=db,
+            )
         )
-    )
 
         gmail = GmailService(
-        access_token=access_token
-    )
+            access_token=access_token
+        )
 
         result = await gmail.list_emails(
-        query=f"newer_than:{days}d",
-        max_results=100,
-    )
+            query=f"newer_than:{days}d",
+            max_results=100,
+        )
 
         messages = result.get(
-        "messages",
-        []
-    )
+            "messages",
+            []
+        )
 
         saved_count = 0
 
@@ -48,30 +51,30 @@ class EmailSyncService:
             gmail_message_id = message["id"]
 
             existing = (
-            db.query(Email)
-            .filter(
-                Email.gmail_message_id
-                == gmail_message_id
+                db.query(Email)
+                .filter(
+                    Email.gmail_message_id
+                    == gmail_message_id
+                )
+                .first()
             )
-            .first()
-        )
 
             if existing:
                 continue
 
             message_data = (
-            await gmail.get_email(
-                gmail_message_id
+                await gmail.get_email(
+                    gmail_message_id
+                )
             )
-        )
 
             email = (
-            EmailSyncService
-            ._build_email_model(
-                user_id=user.id,
-                message_data=message_data,
+                EmailSyncService
+                ._build_email_model(
+                    user_id=user.id,
+                    message_data=message_data,
+                )
             )
-        )
 
             db.add(email)
 
@@ -80,6 +83,33 @@ class EmailSyncService:
         db.commit()
 
         return saved_count
+
+    @staticmethod
+    def _clean_email_body(
+        body: str,
+    ) -> str:
+
+        if not body:
+            return ""
+
+        try:
+
+            if "<html" in body.lower():
+
+                soup = BeautifulSoup(
+                    body,
+                    "html.parser",
+                )
+
+                body = soup.get_text(
+                    separator=" ",
+                    strip=True,
+                )
+
+        except Exception:
+            pass
+
+        return body[:EmailSyncService.MAX_EMAIL_LENGTH]
 
     @staticmethod
     def _build_email_model(
@@ -133,6 +163,11 @@ class EmailSyncService:
         body = (
             EmailSyncService
             ._extract_body(payload)
+        )
+
+        body = (
+            EmailSyncService
+            ._clean_email_body(body)
         )
 
         return Email(

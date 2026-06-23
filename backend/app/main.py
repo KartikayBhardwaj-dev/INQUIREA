@@ -10,7 +10,11 @@ from backend.app.core.config import get_settings
 from backend.app.api.gmail import (
     router as gmail_router
 )
+from backend.app.api.email_intelligence import (
 
+    router as email_intelligence_router
+
+)
 settings = get_settings()
 
 app = FastAPI(
@@ -42,3 +46,8 @@ app.include_router(
 )
 
 app.include_router(gmail_router)
+app.include_router(
+
+    email_intelligence_router
+
+)

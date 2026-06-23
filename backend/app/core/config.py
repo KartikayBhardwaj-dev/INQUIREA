@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
+    GROQ_API_KEY: str
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
 

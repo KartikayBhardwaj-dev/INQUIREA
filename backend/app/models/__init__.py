@@ -10,3 +10,6 @@ from backend.app.models.approval import Approval
 from backend.app.models.agent_run import AgentRun
 from backend.app.models.workflow_run import WorkflowRun
 from backend.app.models.chat_history import ChatHistory
+from backend.app.models.email_intelligence import (
+    EmailIntelligence,
+)
