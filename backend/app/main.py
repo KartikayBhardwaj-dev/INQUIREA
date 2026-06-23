@@ -13,6 +13,17 @@ from backend.app.api.gmail import (
 from backend.app.api.email_intelligence import (
 
     router as email_intelligence_router
+)
+
+from backend.app.api.agents import (router as agent_router)
+from backend.app.tools.bootstrap import (
+
+    register_tools,
+
+)
+from backend.app.agents.bootstrap import (
+
+    register_agents,
 
 )
 settings = get_settings()
@@ -20,7 +31,8 @@ settings = get_settings()
 app = FastAPI(
     title=settings.APP_NAME
 )
-
+register_tools()
+register_agents()
 app.add_middleware(
     SessionMiddleware,
     secret_key=settings.SESSION_SECRET_KEY
@@ -51,3 +63,5 @@ app.include_router(
     email_intelligence_router
 
 )
+
+app.include_router(agent_router)
