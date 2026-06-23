@@ -7,7 +7,9 @@ from starlette.middleware.sessions import (
 from backend.app.api.auth import router as auth_router
 
 from backend.app.core.config import get_settings
-
+from backend.app.api.gmail import (
+    router as gmail_router
+)
 
 settings = get_settings()
 
@@ -38,3 +40,5 @@ def health():
 app.include_router(
     auth_router
 )
+
+app.include_router(gmail_router)

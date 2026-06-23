@@ -1,8 +1,8 @@
-"""initial_schema
+"""initial schema
 
-Revision ID: dc9e236ad3b5
+Revision ID: 6908c1a66d14
 Revises: 
-Create Date: 2026-06-23 11:23:05.974636
+Create Date: 2026-06-23 12:51:12.284372
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'dc9e236ad3b5'
+revision: str = '6908c1a66d14'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -45,66 +45,89 @@ def upgrade() -> None:
     sa.Column('draft', sa.String(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('email_attachments',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('email_id', sa.Integer(), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('email_categories',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('email_id', sa.Integer(), nullable=False),
     sa.Column('category', sa.String(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('email_threads',
-    sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('gmail_thread_id', sa.String(), nullable=False),
-    sa.PrimaryKeyConstraint('id')
-    )
     op.create_table('users',
     sa.Column('id', sa.Integer(), nullable=False),
-    sa.Column('email', sa.String(length=255), nullable=False),
+    sa.Column('email', sa.String(), nullable=False),
     sa.Column('full_name', sa.String(), nullable=True),
     sa.Column('google_id', sa.String(), nullable=True),
     sa.Column('profile_picture', sa.String(), nullable=True),
     sa.Column('google_access_token', sa.String(), nullable=True),
     sa.Column('google_refresh_token', sa.String(), nullable=True),
-    sa.Column('last_sync_at', sa.DateTime(), nullable=True),
+    sa.Column('google_token_expiry', sa.DateTime(), nullable=True),
+    sa.Column('last_login_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_index(op.f('ix_users_email'), 'users', ['email'], unique=True)
     op.create_table('workflow_runs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('workflow_name', sa.String(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
-    op.create_table('emails',
+    op.create_table('email_threads',
     sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('gmail_thread_id', sa.String(), nullable=False),
     sa.Column('user_id', sa.Integer(), nullable=False),
-    sa.Column('gmail_id', sa.String(), nullable=False),
-    sa.Column('thread_id', sa.String(), nullable=False),
-    sa.Column('sender', sa.String(), nullable=False),
     sa.Column('subject', sa.String(), nullable=False),
-    sa.Column('body', sa.Text(), nullable=False),
-    sa.Column('received_at', sa.DateTime(), nullable=True),
     sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
+    op.create_index(op.f('ix_email_threads_gmail_thread_id'), 'email_threads', ['gmail_thread_id'], unique=True)
+    op.create_index(op.f('ix_email_threads_user_id'), 'email_threads', ['user_id'], unique=False)
+    op.create_table('emails',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('user_id', sa.Integer(), nullable=False),
+    sa.Column('gmail_message_id', sa.String(), nullable=False),
+    sa.Column('gmail_thread_id', sa.String(), nullable=False),
+    sa.Column('sender', sa.String(), nullable=False),
+    sa.Column('recipient', sa.String(), nullable=False),
+    sa.Column('subject', sa.String(), nullable=False),
+    sa.Column('snippet', sa.String(), nullable=True),
+    sa.Column('body', sa.Text(), nullable=True),
+    sa.Column('received_at', sa.DateTime(), nullable=True),
+    sa.Column('label_ids', sa.JSON(), nullable=False),
+    sa.Column('is_processed', sa.Boolean(), nullable=False),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
+    sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_emails_gmail_message_id'), 'emails', ['gmail_message_id'], unique=True)
+    op.create_index(op.f('ix_emails_gmail_thread_id'), 'emails', ['gmail_thread_id'], unique=False)
+    op.create_index(op.f('ix_emails_user_id'), 'emails', ['user_id'], unique=False)
+    op.create_table('email_attachments',
+    sa.Column('id', sa.Integer(), nullable=False),
+    sa.Column('email_id', sa.Integer(), nullable=False),
+    sa.Column('filename', sa.String(), nullable=False),
+    sa.Column('mime_type', sa.String(), nullable=False),
+    sa.Column('attachment_id', sa.String(), nullable=False),
+    sa.ForeignKeyConstraint(['email_id'], ['emails.id'], ),
+    sa.PrimaryKeyConstraint('id')
+    )
+    op.create_index(op.f('ix_email_attachments_email_id'), 'email_attachments', ['email_id'], unique=False)
     # ### end Alembic commands ###
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     # ### commands auto generated by Alembic - please adjust! ###
-    op.drop_table('emails')
-    op.drop_table('workflow_runs')
-    op.drop_index(op.f('ix_users_email'), table_name='users')
-    op.drop_table('users')
-    op.drop_table('email_threads')
-    op.drop_table('email_categories')
+    op.drop_index(op.f('ix_email_attachments_email_id'), table_name='email_attachments')
     op.drop_table('email_attachments')
+    op.drop_index(op.f('ix_emails_user_id'), table_name='emails')
+    op.drop_index(op.f('ix_emails_gmail_thread_id'), table_name='emails')
+    op.drop_index(op.f('ix_emails_gmail_message_id'), table_name='emails')
+    op.drop_table('emails')
+    op.drop_index(op.f('ix_email_threads_user_id'), table_name='email_threads')
+    op.drop_index(op.f('ix_email_threads_gmail_thread_id'), table_name='email_threads')
+    op.drop_table('email_threads')
+    op.drop_table('workflow_runs')
+    op.drop_table('users')
+    op.drop_table('email_categories')
     op.drop_table('draft_replies')
     op.drop_table('chat_history')
     op.drop_table('approvals')

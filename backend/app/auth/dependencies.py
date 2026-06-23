@@ -7,7 +7,6 @@ from fastapi.security import HTTPBearer
 
 from backend.app.core.config import get_settings
 
-
 settings = get_settings()
 
 security = HTTPBearer()
@@ -18,21 +17,20 @@ def get_current_user(
         security
     )
 ):
-
     token = credentials.credentials
 
     try:
-
         payload = jwt.decode(
             token,
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
 
-        return payload
+        return {
+            "user_id": int(payload["sub"])
+        }
 
     except Exception:
-
         raise HTTPException(
             status_code=401,
             detail="Invalid token"

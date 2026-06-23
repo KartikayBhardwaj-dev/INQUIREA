@@ -3,6 +3,8 @@ from datetime import datetime
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
 from sqlalchemy import Text
+from sqlalchemy import JSON
+
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 
@@ -17,22 +19,41 @@ class Email(Base):
     )
 
     user_id: Mapped[int] = mapped_column(
-        ForeignKey("users.id")
+        ForeignKey("users.id"),
+        index=True
     )
 
-    gmail_id: Mapped[str]
+    gmail_message_id: Mapped[str] = mapped_column(
+        unique=True,
+        index=True
+    )
 
-    thread_id: Mapped[str]
+    gmail_thread_id: Mapped[str] = mapped_column(
+        index=True
+    )
 
     sender: Mapped[str]
 
+    recipient: Mapped[str]
+
     subject: Mapped[str]
 
-    body: Mapped[str] = mapped_column(
+    snippet: Mapped[str | None]
+
+    body: Mapped[str | None] = mapped_column(
         Text
     )
 
     received_at: Mapped[datetime | None]
+
+    label_ids: Mapped[list] = mapped_column(
+        JSON,
+        default=list
+    )
+
+    is_processed: Mapped[bool] = mapped_column(
+        default=False
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
