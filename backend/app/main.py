@@ -1,21 +1,40 @@
 from fastapi import FastAPI
 
-from backend.app.api.health import router as health_router
-from backend.app.core.config import get_settings
-from backend.app.core.logger import setup_logging
+from starlette.middleware.sessions import (
+    SessionMiddleware
+)
 
-setup_logging()
+from backend.app.api.auth import router as auth_router
+
+from backend.app.core.config import get_settings
+
 
 settings = get_settings()
 
 app = FastAPI(
-    title=settings.APP_NAME,
-    version=settings.APP_VERSION,
+    title=settings.APP_NAME
 )
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=settings.SESSION_SECRET_KEY
+)
+
+
 @app.get("/")
 def root():
     return {
-        "app": "Inquirea",
-        "status": "running"
+        "message": "Inquirea API"
     }
-app.include_router(health_router)
+
+
+@app.get("/health")
+def health():
+    return {
+        "status": "healthy"
+    }
+
+
+app.include_router(
+    auth_router
+)

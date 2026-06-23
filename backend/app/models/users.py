@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import DateTime
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 
@@ -14,11 +14,7 @@ class User(Base):
         primary_key=True
     )
 
-    email: Mapped[str] = mapped_column(
-        String(255),
-        unique=True,
-        index=True
-    )
+    email: Mapped[str]
 
     full_name: Mapped[str | None]
 
@@ -30,7 +26,9 @@ class User(Base):
 
     google_refresh_token: Mapped[str | None]
 
-    last_sync_at: Mapped[datetime | None]
+    google_token_expiry: Mapped[datetime | None]
+
+    last_login_at: Mapped[datetime | None]
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
