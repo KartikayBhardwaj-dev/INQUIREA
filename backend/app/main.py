@@ -1,67 +1,80 @@
+print(">>> main.py: start")
+
+print(">>> importing FastAPI")
 from fastapi import FastAPI
+print("<<< FastAPI imported")
 
-from starlette.middleware.sessions import (
-    SessionMiddleware
-)
+print(">>> importing SessionMiddleware")
+from starlette.middleware.sessions import SessionMiddleware
+print("<<< SessionMiddleware imported")
 
+print(">>> importing auth router")
 from backend.app.api.auth import router as auth_router
+print("<<< auth router imported")
 
+print(">>> importing settings")
 from backend.app.core.config import get_settings
-from backend.app.api.gmail import (
-    router as gmail_router
-)
+print("<<< settings imported")
+
+print(">>> importing gmail router")
+from backend.app.api.gmail import router as gmail_router
+print("<<< gmail router imported")
+
+print(">>> importing email intelligence router")
 from backend.app.api.email_intelligence import (
-
-    router as email_intelligence_router
+    router as email_intelligence_router,
 )
+print("<<< email intelligence router imported")
 
-from backend.app.api.agents import (router as agent_router)
-from backend.app.tools.bootstrap import (
+print(">>> importing agents router")
+from backend.app.api.agents import router as agent_router
+print("<<< agents router imported")
 
-    register_tools,
+print(">>> importing register_tools")
+from backend.app.tools.bootstrap import register_tools
+print("<<< register_tools imported")
 
-)
-from backend.app.agents.bootstrap import (
+print(">>> importing register_agents")
+from backend.app.agents.bootstrap import register_agents
+print("<<< register_agents imported")
 
-    register_agents,
-
-)
+print(">>> get_settings()")
 settings = get_settings()
+print("<<< get_settings()")
 
-app = FastAPI(
-    title=settings.APP_NAME
-)
+print(">>> FastAPI()")
+app = FastAPI(title=settings.APP_NAME)
+print("<<< FastAPI()")
+
+print(">>> register_tools()")
 register_tools()
+print("<<< register_tools()")
+
+print(">>> register_agents()")
 register_agents()
+print("<<< register_agents()")
+
+print(">>> add_middleware()")
 app.add_middleware(
     SessionMiddleware,
-    secret_key=settings.SESSION_SECRET_KEY
+    secret_key=settings.SESSION_SECRET_KEY,
 )
+print("<<< add_middleware()")
 
+print(">>> include auth")
+app.include_router(auth_router)
+print("<<< include auth")
 
-@app.get("/")
-def root():
-    return {
-        "message": "Inquirea API"
-    }
-
-
-@app.get("/health")
-def health():
-    return {
-        "status": "healthy"
-    }
-
-
-app.include_router(
-    auth_router
-)
-
+print(">>> include gmail")
 app.include_router(gmail_router)
-app.include_router(
+print("<<< include gmail")
 
-    email_intelligence_router
+print(">>> include email intelligence")
+app.include_router(email_intelligence_router)
+print("<<< include email intelligence")
 
-)
-
+print(">>> include agents")
 app.include_router(agent_router)
+print("<<< include agents")
+
+print(">>> main.py finished")

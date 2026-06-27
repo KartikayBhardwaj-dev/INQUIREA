@@ -182,12 +182,10 @@ class EmailSyncService:
                 ""
             ),
             body=body,
-            label_ids=",".join(
-                message_data.get(
-                    "labelIds",
-                    []
-                )
-            ),
+            label_ids=message_data.get(
+    "labelIds",
+    []
+),
             received_at=received_at,
             is_processed=False,
         )

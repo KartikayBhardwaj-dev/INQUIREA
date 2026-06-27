@@ -89,26 +89,67 @@ def get_intelligence(
 
 
 @router.get("/{email_id}")
+
 def get_email_intelligence(
+
     email_id: int,
+
     current_user=Depends(
+
         get_current_user
+
     ),
+
     db: Session = Depends(
+
         get_db
+
     ),
+
 ):
 
     intelligence = (
+
         db.query(
+
             EmailIntelligence
+
         )
-        .filter(
-            EmailIntelligence.email_id
+
+        .join(
+
+            Email,
+
+            Email.id
+
             ==
-            email_id
+
+            EmailIntelligence.email_id
+
         )
+
+        .filter(
+
+            EmailIntelligence.email_id
+
+            ==
+
+            email_id
+
+        )
+
+        .filter(
+
+            Email.user_id
+
+            ==
+
+            current_user["user_id"]
+
+        )
+
         .first()
+
     )
 
     return intelligence

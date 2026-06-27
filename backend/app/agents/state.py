@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Any
 
 
@@ -12,8 +12,23 @@ class AgentState(BaseModel):
 
     body: str = ""
 
-    intelligence: dict[str, Any] = {}
+    category: str | None = None
 
-    memory: dict[str, Any] = {}
+    priority: str | None = None
 
-    errors: list[str] = []
+    summary: str | None = None
+
+    extracted_data: dict[str, Any] = Field(
+        default_factory=dict
+    )
+
+    draft_reply: str | None = None
+
+    memory: dict[str, Any] = Field(
+        default_factory=dict
+    )
+
+    errors: list[str] = Field(
+        default_factory=list
+    )
+    thread_summary: str | None

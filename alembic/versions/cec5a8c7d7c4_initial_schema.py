@@ -1,8 +1,8 @@
-"""initial
+"""initial schema
 
-Revision ID: de21267c8b1a
+Revision ID: cec5a8c7d7c4
 Revises: 
-Create Date: 2026-06-23 16:44:07.469073
+Create Date: 2026-06-24 19:21:07.209090
 
 """
 from typing import Sequence, Union
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'de21267c8b1a'
+revision: str = 'cec5a8c7d7c4'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -24,6 +24,10 @@ def upgrade() -> None:
     op.create_table('agent_runs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('agent_name', sa.String(), nullable=False),
+    sa.Column('email_id', sa.Integer(), nullable=True),
+    sa.Column('success', sa.Boolean(), nullable=False),
+    sa.Column('result', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('approvals',
@@ -67,6 +71,10 @@ def upgrade() -> None:
     op.create_table('workflow_runs',
     sa.Column('id', sa.Integer(), nullable=False),
     sa.Column('workflow_name', sa.String(), nullable=False),
+    sa.Column('email_id', sa.Integer(), nullable=True),
+    sa.Column('status', sa.String(), nullable=False),
+    sa.Column('result', sa.JSON(), nullable=True),
+    sa.Column('created_at', sa.DateTime(), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('email_threads',

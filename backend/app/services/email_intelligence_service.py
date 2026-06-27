@@ -1,44 +1,24 @@
 from datetime import datetime
 
-from langchain_core.output_parsers import JsonOutputParser
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_groq import ChatGroq
-
 from sqlalchemy.orm import Session
 
-from tenacity import (
-    retry,
-    wait_exponential,
-    stop_after_attempt,
-)
-
-from backend.app.core.config import get_settings
 from backend.app.models.email import Email
 from backend.app.models.email_intelligence import (
     EmailIntelligence,
 )
 
-settings = get_settings()
+from backend.app.models.workflow_run import (
+    WorkflowRun,
+)
+
+from backend.app.workflows.workflow_service import (
+    WorkflowService,
+)
 
 
 class EmailIntelligenceService:
 
-    llm = ChatGroq(
-        groq_api_key=settings.GROQ_API_KEY,
-        model_name="llama-3.1-8b-instant",
-        temperature=0,
-    )
-
     @staticmethod
-    @retry(
-        wait=wait_exponential(
-            multiplier=2,
-            min=5,
-            max=60,
-        ),
-        stop=stop_after_attempt(5),
-        reraise=True,
-    )
     async def process_email(
         db: Session,
         email: Email,
@@ -58,171 +38,111 @@ class EmailIntelligenceService:
         if existing:
             return existing
 
-        email_content = f"""
-Subject:
-{email.subject}
-
-Snippet:
-{email.snippet}
-
-Body:
-{(email.body or '')[:2500]}
-"""
-
-        prompt = ChatPromptTemplate.from_template(
-            """
-You are an expert email intelligence engine.
-
-Analyze the email.
-
-Return ONLY raw JSON.
-
-Do NOT use markdown.
-Do NOT use ```json.
-Do NOT use comments.
-Do NOT explain anything.
-
-Categories:
-
-- opportunity
-- deadline
-- finance
-- job
-- internship
-- meeting
-- reply_required
-- promotion
-- personal
-- other
-
-Priority:
-
-- low
-- medium
-- high
-- urgent
-
-EMAIL
-
-{email_content}
-
-Return exactly:
-
-{{
-    "category": "",
-    "priority": "",
-    "summary": "",
-    "confidence": 0.0,
-    "tags": [],
-    "dates": [],
-    "deadlines": [],
-    "amounts": [],
-    "links": [],
-    "organizations": [],
-    "contacts": [],
-    "action_items": [],
-    "requires_reply": false,
-    "key_facts": [],
-    "custom_entities": {{}}
-}}
-"""
-        )
-
-        chain = (
-            prompt
-            | EmailIntelligenceService.llm
-            | JsonOutputParser()
-        )
-
-        result = await chain.ainvoke(
-            {
-                "email_content": email_content
-            }
-        )
-
-        intelligence = EmailIntelligence(
+        workflow_run = WorkflowRun(
+            workflow_name="email_processing",
             email_id=email.id,
-            category=result.get(
-                "category"
-            ),
-            priority=result.get(
-                "priority"
-            ),
-            summary=result.get(
-                "summary"
-            ),
-            confidence=result.get(
-                "confidence"
-            ),
-            tags=result.get(
-                "tags",
-                [],
-            ),
-            extracted_data={
-                "dates": result.get(
-                    "dates",
-                    [],
+            status="running",
+            result={},
+        )
+
+        db.add(workflow_run)
+        db.commit()
+        db.refresh(workflow_run)
+
+        try:
+
+            state = {
+    "email_id": email.id,
+    "subject": email.subject or "",
+    "sender": email.sender or "",
+    "body": email.body or "",
+    "category": None,
+    "priority": None,
+    "summary": None,
+    "draft_reply": None,
+    "thread_summary": None,
+    "tone": "professional",
+    "thread_context": "",
+    "extracted_data": {},
+    "memory": {},
+    "next_agent": None,
+    "errors": [],
+}
+
+            result = (
+                await WorkflowService
+                .run_email_workflow(
+                    state
+                )
+            )
+
+            intelligence = EmailIntelligence(
+                email_id=email.id,
+                category=result.get(
+                    "category"
                 ),
-                "deadlines": result.get(
-                    "deadlines",
-                    [],
+                priority=result.get(
+                    "priority"
                 ),
-                "amounts": result.get(
-                    "amounts",
-                    [],
+                summary=result.get(
+                    "summary"
                 ),
-                "links": result.get(
-                    "links",
-                    [],
-                ),
-                "organizations": result.get(
-                    "organizations",
-                    [],
-                ),
-                "contacts": result.get(
-                    "contacts",
-                    [],
-                ),
-                "action_items": result.get(
-                    "action_items",
-                    [],
-                ),
-                "requires_reply": result.get(
-                    "requires_reply",
-                    False,
-                ),
-                "key_facts": result.get(
-                    "key_facts",
-                    [],
-                ),
-                "custom_entities": result.get(
-                    "custom_entities",
+                extracted_data=result.get(
+                    "extracted_data",
                     {},
                 ),
-            },
-            processed_at=datetime.utcnow(),
-        )
+                tags=[],
+                confidence=1.0,
+                processed_at=datetime.utcnow(),
+            )
 
-        db.add(intelligence)
+            db.add(intelligence)
 
-        email.is_processed = True
+            email.is_processed = True
 
-        db.commit()
+            workflow_run.status = (
+                "completed"
+            )
 
-        db.refresh(intelligence)
+            workflow_run.result = (
+                result
+            )
 
-        return intelligence
+            db.commit()
+
+            db.refresh(
+                intelligence
+            )
+
+            return intelligence
+
+        except Exception as e:
+
+            workflow_run.status = (
+                "failed"
+            )
+
+            workflow_run.result = {
+                "error": str(e)
+            }
+
+            db.commit()
+
+            raise e
+
     @staticmethod
     async def process_all_unprocessed(
-    db: Session,
-):
+        db: Session,
+    ):
+
         emails = (
-        db.query(Email)
-        .filter(
-            Email.is_processed == False
+            db.query(Email)
+            .filter(
+                Email.is_processed
+                == False
+            )
+            .all()
         )
-        .all()
-    )
 
         processed = 0
 
@@ -230,13 +150,13 @@ Return exactly:
 
             try:
 
-                result = await (
-                EmailIntelligenceService
-                .process_email(
-                    db,
-                    email,
+                result = (
+                    await EmailIntelligenceService
+                    .process_email(
+                        db,
+                        email,
+                    )
                 )
-            )
 
                 if result:
                     processed += 1
@@ -244,7 +164,7 @@ Return exactly:
             except Exception as e:
 
                 print(
-                f"Email {email.id} failed: {e}"
-            )
+                    f"Email {email.id} failed: {e}"
+                )
 
         return processed

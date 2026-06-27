@@ -1,6 +1,18 @@
 from abc import ABC
 from abc import abstractmethod
 
+from backend.app.agents.state import (
+    AgentState,
+)
+
+from backend.app.database.session import (
+    SessionLocal,
+)
+
+from backend.app.models.agent_run import (
+    AgentRun,
+)
+
 
 class BaseAgent(ABC):
 
@@ -8,14 +20,32 @@ class BaseAgent(ABC):
 
     async def run(
         self,
-        state,
+        state: AgentState,
     ):
+
+        db = SessionLocal()
 
         try:
 
             result = await self.execute(
                 state
             )
+
+            db.add(
+                AgentRun(
+                    agent_name=self.name,
+                    email_id=state.get("email_id"),
+                    success=True,
+                    result=result.model_dump()
+                    if hasattr(
+                        result,
+                        "model_dump",
+                    )
+                    else result,
+                )
+            )
+
+            db.commit()
 
             return {
                 "success": True,
@@ -26,12 +56,35 @@ class BaseAgent(ABC):
 
         except Exception as e:
 
+            db.add(
+                AgentRun(
+                    agent_name=self.name,
+                    email_id=state.get("email_id"),
+                    success=False,
+                    result={
+                        "error": str(e)
+                    },
+                )
+            )
+
+            db.commit()
+
+            state.setdefault(
+    "errors",
+    []
+).append(
+    str(e)
+)
+
             return {
                 "success": False,
                 "agent": self.name,
                 "result": None,
                 "error": str(e),
             }
+
+        finally:
+            db.close()
 
     @abstractmethod
     async def execute(

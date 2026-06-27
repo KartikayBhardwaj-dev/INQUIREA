@@ -12,11 +12,16 @@ class AgentRegistry:
         ] = agent
 
     @classmethod
-    def get(
-        cls,
-        name,
-    ):
-        return cls._agents.get(name)
+    def get(cls, name):
+
+        agent = cls._agents.get(name)
+
+        if not agent:
+            raise ValueError(
+            f"Agent {name} not registered"
+        )
+
+        return agent
 
     @classmethod
     def all(cls):

@@ -25,25 +25,7 @@ async def list_agents():
     }
 
 
-@router.get("/test")
-async def run_test_agent():
 
-    agent = AgentRegistry.get(
-        "test_agent"
-    )
-
-    if not agent:
-
-        raise HTTPException(
-            status_code=404,
-            detail="Agent not found",
-        )
-
-    result = await agent.run(
-        AgentState()
-    )
-
-    return result
 
 
 @router.get("/classification")

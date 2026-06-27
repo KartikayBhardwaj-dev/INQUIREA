@@ -12,9 +12,9 @@ from backend.app.agents.base_agent import (
 from backend.app.core.llm import llm
 
 
-class ClassificationAgent(BaseAgent):
+class ExtractionAgent(BaseAgent):
 
-    name = "classification_agent"
+    name = "extraction_agent"
 
     async def execute(
         self,
@@ -23,27 +23,7 @@ class ClassificationAgent(BaseAgent):
 
         prompt = ChatPromptTemplate.from_template(
             """
-Classify this email.
-
-Categories:
-
-- opportunity
-- deadline
-- finance
-- job
-- internship
-- meeting
-- reply_required
-- promotion
-- personal
-- other
-
-Priorities:
-
-- low
-- medium
-- high
-- urgent
+Extract information from this email.
 
 EMAIL
 
@@ -53,11 +33,18 @@ Subject:
 Body:
 {body}
 
-Return JSON:
+Return JSON only.
 
 {{
-    "category": "",
-    "priority": ""
+    "dates": [],
+    "deadlines": [],
+    "amounts": [],
+    "links": [],
+    "organizations": [],
+    "contacts": [],
+    "action_items": [],
+    "requires_reply": false,
+    "key_facts": []
 }}
 """
         )
@@ -75,8 +62,6 @@ Return JSON:
     }
 )
 
-        state["category"] = result.get("category")
-
-        state["priority"] = result.get("priority")
+        state["extracted_data"] = result
 
         return state
