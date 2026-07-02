@@ -1,6 +1,4 @@
-from backend.app.workflows.email_graph import (
-    get_email_graph,
-)
+from fastapi import Request
 
 
 class WorkflowService:
@@ -9,21 +7,23 @@ class WorkflowService:
     async def run_email_workflow(
         cls,
         state,
+        config: dict,  # Added config parameter to receive external setup (like the DB session)
+        request: Request,
     ):
 
-        config = {
+        graph = request.app.state.graph
+
+        # Combine our thread tracking data safely with incoming configurable connections
+        graph_config = {
             "configurable": {
-                "thread_id": str(
-                    state["email_id"]
-                )
+                "thread_id": str(state["email_id"]),
+                **config.get("configurable", {})  # Merges the live DB session cleanly
             }
         }
 
-        async with get_email_graph() as graph:
-
-            result = await graph.ainvoke(
-                state,
-                config=config,
-            )
+        result = await graph.ainvoke(
+            state,
+            config=graph_config,
+        )
 
         return result

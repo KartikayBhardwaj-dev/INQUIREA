@@ -1,5 +1,4 @@
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends, Request
 
 from sqlalchemy.orm import Session
 
@@ -26,6 +25,7 @@ router = APIRouter(
 
 @router.post("/process")
 async def process_unprocessed_emails(
+    request: Request,
     current_user=Depends(
         get_current_user
     ),
@@ -37,7 +37,8 @@ async def process_unprocessed_emails(
     count = (
         await EmailIntelligenceService
         .process_all_unprocessed(
-            db
+            db=db,
+            request=request,
         )
     )
 
@@ -89,21 +90,16 @@ def get_intelligence(
 
 
 @router.get("/{email_id}")
-
 def get_email_intelligence(
 
     email_id: int,
 
     current_user=Depends(
-
         get_current_user
-
     ),
 
     db: Session = Depends(
-
         get_db
-
     ),
 
 ):
@@ -111,41 +107,26 @@ def get_email_intelligence(
     intelligence = (
 
         db.query(
-
             EmailIntelligence
-
         )
 
         .join(
-
             Email,
-
             Email.id
-
             ==
-
             EmailIntelligence.email_id
-
         )
 
         .filter(
-
             EmailIntelligence.email_id
-
             ==
-
             email_id
-
         )
 
         .filter(
-
             Email.user_id
-
             ==
-
             current_user["user_id"]
-
         )
 
         .first()

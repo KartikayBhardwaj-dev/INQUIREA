@@ -1,51 +1,33 @@
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
+import logging
 
-from backend.app.agents.state import (
-    AgentState,
-)
+from backend.app.agents.state import AgentState
+from backend.app.models.agent_run import AgentRun
 
-from backend.app.database.session import (
-    SessionLocal,
-)
-
-from backend.app.models.agent_run import (
-    AgentRun,
-)
-
+logger = logging.getLogger(__name__)
 
 class BaseAgent(ABC):
-
     name = "base"
 
-    async def run(
-        self,
-        state: AgentState,
-    ):
-
-        db = SessionLocal()
+    async def run(self, state: AgentState):
+        db = state.get("db")
 
         try:
+            result = await self.execute(state)
 
-            result = await self.execute(
-                state
-            )
-
-            db.add(
-                AgentRun(
-                    agent_name=self.name,
-                    email_id=state.get("email_id"),
-                    success=True,
-                    result=result.model_dump()
-                    if hasattr(
-                        result,
-                        "model_dump",
+            if db is not None:
+                db.add(
+                    AgentRun(
+                        agent_name=self.name,
+                        email_id=state.get("email_id"),
+                        success=True,
+                        result=(
+                            result.model_dump()
+                            if hasattr(result, "model_dump")
+                            else result
+                        ),
                     )
-                    else result,
                 )
-            )
-
-            db.commit()
 
             return {
                 "success": True,
@@ -54,27 +36,24 @@ class BaseAgent(ABC):
                 "error": None,
             }
 
-        except Exception as e:
-
-            db.add(
-                AgentRun(
-                    agent_name=self.name,
-                    email_id=state.get("email_id"),
-                    success=False,
-                    result={
-                        "error": str(e)
-                    },
-                )
+        except Exception as e:  # Added 'as e' to capture the exception instance
+            logger.exception(
+                "%s failed for email %s",
+                self.name,
+                state.get("email_id"),
             )
 
-            db.commit()
+            if db is not None:
+                db.add(
+                    AgentRun(
+                        agent_name=self.name,
+                        email_id=state.get("email_id"),
+                        success=False,
+                        result={"error": str(e)},
+                    )
+                )
 
-            state.setdefault(
-    "errors",
-    []
-).append(
-    str(e)
-)
+            state.setdefault("errors", []).append(str(e))
 
             return {
                 "success": False,
@@ -83,12 +62,6 @@ class BaseAgent(ABC):
                 "error": str(e),
             }
 
-        finally:
-            db.close()
-
     @abstractmethod
-    async def execute(
-        self,
-        state,
-    ):
+    async def execute(self, state):
         pass

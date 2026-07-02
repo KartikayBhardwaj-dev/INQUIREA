@@ -1,5 +1,13 @@
 print(">>> main.py: start")
+from contextlib import asynccontextmanager
 
+from langgraph.checkpoint.postgres.aio import (
+    AsyncPostgresSaver,
+)
+
+from backend.app.workflows.email_graph import (
+    build_graph,
+)
 print(">>> importing FastAPI")
 from fastapi import FastAPI
 print("<<< FastAPI imported")
@@ -43,7 +51,36 @@ settings = get_settings()
 print("<<< get_settings()")
 
 print(">>> FastAPI()")
-app = FastAPI(title=settings.APP_NAME)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    saver_cm = AsyncPostgresSaver.from_conn_string(
+        settings.CHECKPOINT_DATABASE_URL,
+    )
+
+    checkpointer = await saver_cm.__aenter__()
+
+    await checkpointer.setup()
+
+    graph = build_graph().compile(
+        checkpointer=checkpointer,
+    )
+
+    app.state.graph = graph
+    app.state.checkpointer = checkpointer
+    app.state.saver_cm = saver_cm
+
+    print("LangGraph initialized.")
+
+    yield
+
+    await saver_cm.__aexit__(None, None, None)
+
+
+app = FastAPI(
+    title=settings.APP_NAME,
+    lifespan=lifespan,
+)
 print("<<< FastAPI()")
 
 print(">>> register_tools()")

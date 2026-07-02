@@ -2,16 +2,8 @@ from backend.app.agents.registry import (
     AgentRegistry,
 )
 
-from backend.app.agents.classification_agent import (
-    ClassificationAgent,
-)
-
-from backend.app.agents.extraction_agent import (
-    ExtractionAgent,
-)
-
-from backend.app.agents.summary_agent import (
-    SummaryAgent,
+from backend.app.agents.analysis_agent import (
+    AnalysisAgent,
 )
 
 from backend.app.agents.memory_agent import (
@@ -30,15 +22,7 @@ from backend.app.agents.reply_agent import (
 def register_agents():
 
     AgentRegistry.register(
-        ClassificationAgent()
-    )
-
-    AgentRegistry.register(
-        ExtractionAgent()
-    )
-
-    AgentRegistry.register(
-        SummaryAgent()
+        AnalysisAgent()
     )
 
     AgentRegistry.register(

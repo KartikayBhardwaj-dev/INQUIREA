@@ -23,43 +23,53 @@ class SupervisorAgent(BaseAgent):
     ):
 
         prompt = ChatPromptTemplate.from_template(
-            """
-You are the supervisor agent of an AI Email Copilot.
+    """
+You are the routing agent for an AI Email Copilot.
 
-Your job is to decide the next agent.
+Your ONLY job is to decide which downstream agent should process the email.
 
-Available agents:
-
-1. classification
-   - classify email
-   - extract intelligence
-   - summarize
-
-2. reply
-   - generate reply draft
-
-Rules:
-
-Choose "reply" when:
-- email explicitly asks for response
-- sender expects action
-- sender asks questions
-- reply is required
-
-Choose "classification" for everything else.
-
-EMAIL
-
-Subject:
+Email Subject:
 {subject}
 
-Body:
+Email Body:
 {body}
 
-Return JSON only:
+Available routes:
+
+1. analysis
+- classify the email
+- determine priority
+- extract structured information
+- summarize the email
+- summarize the thread
+
+2. reply
+- generate a draft reply
+
+Choose "reply" ONLY when the user is expected to send a response.
+
+Examples:
+✓ asks a question
+✓ requests information
+✓ requests an action
+✓ requests confirmation
+✓ expects a decision
+✓ asks for feedback
+
+Choose "analysis" for:
+✓ newsletters
+✓ notifications
+✓ invoices
+✓ receipts
+✓ shipping updates
+✓ automated emails
+✓ informational emails
+✓ announcements
+
+Return ONLY valid JSON.
 
 {{
-    "next_agent": "classification"
+    "next_agent": "analysis"
 }}
 
 or
@@ -68,7 +78,7 @@ or
     "next_agent": "reply"
 }}
 """
-        )
+)
 
         chain = (
             prompt
@@ -76,31 +86,27 @@ or
             | JsonOutputParser()
         )
 
-        result = await chain.ainvoke(
-            {
-                "subject":
-                state["subject"],
+        try:
+            result = await chain.ainvoke(
+        {
+            "subject": state["subject"],
+            "body": state["body"][:3000],
+        }
+    )
+        except Exception:
+            result = {
+        "next_agent": "analysis"
+    }
 
-                "body":
-                state["body"][:3000],
-            }
-        )
+        next_agent = (
+    result.get("next_agent", "analysis")
+    .strip()
+    .lower()
+)
 
-        next_agent = result.get(
-            "next_agent",
-            "classification",
-        )
+        if next_agent not in {"analysis", "reply"}:
+            next_agent = "analysis"
 
-        if next_agent not in [
-            "classification",
-            "reply",
-        ]:
-            next_agent = (
-                "classification"
-            )
-
-        state["next_agent"] = (
-            next_agent
-        )
+        state["next_agent"] = next_agent
 
         return state

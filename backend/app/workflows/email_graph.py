@@ -1,12 +1,6 @@
-from contextlib import asynccontextmanager
-
 from langgraph.graph import (
     END,
     StateGraph,
-)
-
-from langgraph.checkpoint.sqlite.aio import (
-    AsyncSqliteSaver,
 )
 
 from backend.app.workflows.workflow_state import (
@@ -15,9 +9,7 @@ from backend.app.workflows.workflow_state import (
 
 from backend.app.workflows.email_nodes import (
     supervisor_node,
-    classification_node,
-    extraction_node,
-    summary_node,
+    analysis_node,
     reply_node,
     memory_node,
 )
@@ -26,7 +18,7 @@ from backend.app.workflows.email_nodes import (
 def route_after_supervisor(state):
     return state.get(
         "next_agent",
-        "classification",
+        "analysis",
     )
 
 
@@ -42,18 +34,8 @@ def build_graph():
     )
 
     graph.add_node(
-        "classification",
-        classification_node,
-    )
-
-    graph.add_node(
-        "extraction",
-        extraction_node,
-    )
-
-    graph.add_node(
-        "summary",
-        summary_node,
+        "analysis",
+        analysis_node,
     )
 
     graph.add_node(
@@ -74,23 +56,13 @@ def build_graph():
         "supervisor",
         route_after_supervisor,
         {
-            "classification": "classification",
+            "analysis": "analysis",
             "reply": "reply",
         },
     )
 
     graph.add_edge(
-        "classification",
-        "extraction",
-    )
-
-    graph.add_edge(
-        "extraction",
-        "summary",
-    )
-
-    graph.add_edge(
-        "summary",
+        "analysis",
         "memory",
     )
 
@@ -105,19 +77,3 @@ def build_graph():
     )
 
     return graph
-
-
-@asynccontextmanager
-async def get_email_graph():
-
-    graph = build_graph()
-
-    async with AsyncSqliteSaver.from_conn_string(
-        "inquirea.db"
-    ) as checkpointer:
-
-        compiled = graph.compile(
-            checkpointer=checkpointer
-        )
-
-        yield compiled
