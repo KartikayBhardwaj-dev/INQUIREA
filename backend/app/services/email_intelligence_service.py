@@ -12,7 +12,9 @@ from backend.app.models.email_intelligence import EmailIntelligence
 from backend.app.models.workflow_run import WorkflowRun
 
 from backend.app.workflows.workflow_service import WorkflowService
-
+from backend.app.services.vector_memory_service import (
+    VectorMemoryService,
+)
 settings = get_settings()
 
 
@@ -116,6 +118,11 @@ class EmailIntelligenceService:
             # Commit changes to the database
             db.commit()
             db.refresh(intelligence)
+            # Index the committed email into ChromaDB
+            VectorMemoryService.add_email(
+    db=db,
+    email_id=email.id,
+)
 
             return intelligence
 

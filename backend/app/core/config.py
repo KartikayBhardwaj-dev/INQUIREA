@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     MAX_CONCURRENT_EMAILS: int = 5
 
+    EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
+
+    CHROMA_PATH: str = "backend/app/memory/chroma"
+
+    CHROMA_COLLECTION: str = "email_memory"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore",
