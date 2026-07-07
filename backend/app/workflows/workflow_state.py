@@ -1,5 +1,4 @@
-from typing import Any
-from typing import TypedDict
+from typing import Any, TypedDict
 
 
 class WorkflowState(TypedDict):
@@ -18,16 +17,12 @@ class WorkflowState(TypedDict):
 
     summary: str | None
 
+    thread_summary: str | None
+
     extracted_data: dict[str, Any]
 
     memory: dict[str, Any]
 
-    next_agent: str | None
+    thread_context: str | None
 
     errors: list[str]
-    thread_summary: str | None
-    draft_reply: str | None
-
-    tone: str | None
-
-    thread_context: str | None

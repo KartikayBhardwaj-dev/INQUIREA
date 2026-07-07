@@ -15,6 +15,10 @@ class BaseAgent(ABC):
         try:
             result = await self.execute(state)
 
+            if isinstance(result, dict):
+                result = dict(result)
+                result.pop("db", None)
+
             if db is not None:
                 db.add(
                     AgentRun(

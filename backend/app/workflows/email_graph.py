@@ -1,37 +1,28 @@
-from langgraph.graph import (
-    END,
-    StateGraph,
-)
+from langgraph.graph import END, StateGraph
 
-from backend.app.workflows.workflow_state import (
-    WorkflowState,
-)
-
+from backend.app.workflows.workflow_state import WorkflowState
 from backend.app.workflows.email_nodes import (
-    supervisor_node,
     analysis_node,
-    reply_node,
-    memory_node,
+    persistence_node,
 )
-
-
-def route_after_supervisor(state):
-    return state.get(
-        "next_agent",
-        "analysis",
-    )
 
 
 def build_graph():
+    """
+    Simplified ingestion workflow.
 
-    graph = StateGraph(
-        WorkflowState
-    )
+    Email
+        ↓
+    Analysis
+        ↓
+    Persistence
+        ↓
+    Queue Embedding (inside persistence)
+        ↓
+    END
+    """
 
-    graph.add_node(
-        "supervisor",
-        supervisor_node,
-    )
+    graph = StateGraph(WorkflowState)
 
     graph.add_node(
         "analysis",
@@ -39,41 +30,20 @@ def build_graph():
     )
 
     graph.add_node(
-        "reply",
-        reply_node,
+        "persistence",
+        persistence_node,
     )
 
-    graph.add_node(
-        "memory",
-        memory_node,
-    )
-
-    graph.set_entry_point(
-        "supervisor"
-    )
-
-    graph.add_conditional_edges(
-        "supervisor",
-        route_after_supervisor,
-        {
-            "analysis": "analysis",
-            "reply": "reply",
-        },
-    )
+    graph.set_entry_point("analysis")
 
     graph.add_edge(
         "analysis",
-        "memory",
+        "persistence",
     )
 
     graph.add_edge(
-        "reply",
-        "memory",
-    )
-
-    graph.add_edge(
-        "memory",
+        "persistence",
         END,
     )
 
-    return graph
+    return graph.compile()

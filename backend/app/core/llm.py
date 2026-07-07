@@ -1,25 +1,53 @@
-from langchain_core.rate_limiters import InMemoryRateLimiter
+from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_groq import ChatGroq
 
-from backend.app.core.config import (
-    get_settings,
-)
+from backend.app.core.config import get_settings
 
 settings = get_settings()
 
-# Setup a global rate-limiting queue. 
-# 0.35 requests per second ensures that multiple agents executing steps 
-# in parallel will queue up gracefully instead of bursting over the 6,000 TPM limit.
-rate_limiter = InMemoryRateLimiter(
-    requests_per_second=0.35,
-    check_every_n_seconds=0.1,
-    max_bucket_size=2,
-)
 
-llm = ChatGroq(
-    groq_api_key=settings.GROQ_API_KEY,
-    model_name="llama-3.1-8b-instant",
-    temperature=0,
-    max_retries=5,
-    rate_limiter=rate_limiter,  # Safely handles parallel worker bursts natively
-)
+def get_llm(
+    temperature: float | None = None,
+    max_output_tokens: int | None = None,
+):
+    """
+    Create an LLM instance based on the configured provider.
+    """
+
+    provider = settings.LLM_PROVIDER.lower()
+
+    temp = (
+        temperature
+        if temperature is not None
+        else settings.LLM_TEMPERATURE
+    )
+
+    max_tokens = (
+        max_output_tokens
+        if max_output_tokens is not None
+        else settings.LLM_MAX_OUTPUT_TOKENS
+    )
+
+    if provider == "google":
+        return ChatGoogleGenerativeAI(
+            google_api_key=settings.GOOGLE_API_KEY,
+            model=settings.LLM_MODEL,
+            temperature=temp,
+            max_output_tokens=max_tokens,
+        )
+
+    elif provider == "groq":
+        return ChatGroq(
+            api_key=settings.GROQ_API_KEY,
+            model=settings.LLM_MODEL,
+            temperature=temp,
+            max_tokens=max_tokens,
+        )
+
+    raise ValueError(
+        f"Unsupported LLM provider: {settings.LLM_PROVIDER}"
+    )
+
+
+# Shared default instance used by agents
+llm = get_llm()

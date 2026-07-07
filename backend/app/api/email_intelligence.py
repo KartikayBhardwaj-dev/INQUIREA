@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Depends, Request
-
+from fastapi import APIRouter
+from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from backend.app.auth.dependencies import (
@@ -12,10 +12,6 @@ from backend.app.models.email import Email
 from backend.app.models.email_intelligence import (
     EmailIntelligence,
 )
-from backend.app.models.users import User
-from backend.app.services.email_intelligence_service import (
-    EmailIntelligenceService,
-)
 
 router = APIRouter(
     prefix="/email-intelligence",
@@ -23,114 +19,53 @@ router = APIRouter(
 )
 
 
-@router.post("/process")
-async def process_unprocessed_emails(
-    request: Request,
-    current_user=Depends(
-        get_current_user
-    ),
-    db: Session = Depends(
-        get_db
-    ),
-):
-
-    count = (
-        await EmailIntelligenceService
-        .process_all_unprocessed(
-            db=db,
-            request=request,
-        )
-    )
-
-    return {
-        "success": True,
-        "processed": count,
-    }
-
-
 @router.get("/")
 def get_intelligence(
-    current_user=Depends(
-        get_current_user
-    ),
-    db: Session = Depends(
-        get_db
-    ),
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    """
+    Return all processed email intelligence for
+    the authenticated user.
+    """
 
-    user = (
-        db.query(User)
-        .filter(
-            User.id
-            ==
-            current_user["user_id"]
-        )
-        .first()
-    )
-
-    data = (
-        db.query(
-            EmailIntelligence
-        )
+    return (
+        db.query(EmailIntelligence)
         .join(
             Email,
-            Email.id
-            ==
-            EmailIntelligence.email_id
+            Email.id == EmailIntelligence.email_id,
         )
         .filter(
-            Email.user_id
-            ==
-            user.id
+            Email.user_id == current_user["user_id"],
+        )
+        .order_by(
+            Email.received_at.desc(),
         )
         .all()
     )
 
-    return data
-
 
 @router.get("/{email_id}")
 def get_email_intelligence(
-
     email_id: int,
-
-    current_user=Depends(
-        get_current_user
-    ),
-
-    db: Session = Depends(
-        get_db
-    ),
-
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
+    """
+    Return intelligence for a single email.
+    """
 
-    intelligence = (
-
-        db.query(
-            EmailIntelligence
-        )
-
+    return (
+        db.query(EmailIntelligence)
         .join(
             Email,
-            Email.id
-            ==
-            EmailIntelligence.email_id
+            Email.id == EmailIntelligence.email_id,
         )
-
         .filter(
-            EmailIntelligence.email_id
-            ==
-            email_id
+            EmailIntelligence.email_id == email_id,
         )
-
         .filter(
-            Email.user_id
-            ==
-            current_user["user_id"]
+            Email.user_id == current_user["user_id"],
         )
-
         .first()
-
     )
-
-    return intelligence

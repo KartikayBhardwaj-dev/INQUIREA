@@ -23,7 +23,16 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_ID: str
     GOOGLE_CLIENT_SECRET: str
 
-    GROQ_API_KEY: str
+    # ----------------------------------------
+    # LLM Configuration
+    # ----------------------------------------
+
+    GOOGLE_API_KEY: str
+
+    LLM_PROVIDER: str = "google"
+    LLM_MODEL: str = "gemini-2.5-flash"
+    LLM_TEMPERATURE: float = 0.0
+    LLM_MAX_OUTPUT_TOKENS: int = 2048
 
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60
     MAX_CONCURRENT_EMAILS: int = 5
@@ -31,8 +40,78 @@ class Settings(BaseSettings):
     EMBEDDING_MODEL: str = "BAAI/bge-small-en-v1.5"
 
     CHROMA_PATH: str = "backend/app/memory/chroma"
-
     CHROMA_COLLECTION: str = "email_memory"
+
+    EMAIL_QUEUE_SIZE: int = 500
+    EMAIL_WORKERS: int = 2
+    EMAIL_RETRY_LIMIT: int = 5
+    EMAIL_BATCH_SIZE: int = 10
+    QUEUE_POLL_INTERVAL: float = 0.5
+
+    # ----------------------------------------
+    # LLM Rate Limiting
+    # ----------------------------------------
+
+    LLM_MAX_CONCURRENT_REQUESTS: int = 5
+    LLM_MAX_RETRIES: int = 5
+    LLM_INITIAL_BACKOFF: float = 2.0
+    LLM_MAX_BACKOFF: float = 30.0
+    LLM_TOKENS_PER_MINUTE: int = 250000
+        # ----------------------------------------
+    # LLM Rate Limiting
+    # ----------------------------------------
+
+    LLM_MAX_CONCURRENT_REQUESTS: int = 5
+
+    LLM_MAX_RETRIES: int = 5
+    LLM_INITIAL_BACKOFF: float = 2.0
+    LLM_MAX_BACKOFF: float = 30.0
+
+    # Provider limits
+    LLM_TOKENS_PER_MINUTE: int = 250000
+    LLM_REQUESTS_PER_MINUTE: int = 1000
+
+    # Batch scheduling
+    LLM_BATCH_SIZE: int = 10
+    LLM_BATCH_WAIT_MS: int = 50
+
+    # Adaptive concurrency
+    LLM_MIN_CONCURRENT_REQUESTS: int = 2
+    LLM_MAX_CONCURRENT_LIMIT: int = 10
+    LLM_ENABLE_ADAPTIVE_CONCURRENCY: bool = True
+    LLM_REQUESTS_PER_MINUTE: int = 60
+    GROQ_API_KEY: str | None = None
+
+    # ----------------------------------------
+    # Celery
+    # ----------------------------------------
+
+    REDIS_URL: str = "redis://localhost:6379/0"
+
+    CELERY_BROKER_URL: str = REDIS_URL
+    CELERY_RESULT_BACKEND: str = REDIS_URL
+
+    CELERY_TASK_SERIALIZER: str = "json"
+    CELERY_RESULT_SERIALIZER: str = "json"
+    CELERY_ACCEPT_CONTENT: list[str] = ["json"]
+
+    CELERY_TIMEZONE: str = "UTC"
+    CELERY_ENABLE_UTC: bool = True
+
+    CELERY_MAX_RETRIES: int = 5
+    CELERY_RETRY_BACKOFF: bool = True
+    CELERY_RETRY_BACKOFF_MAX: int = 600
+    CELERY_RETRY_JITTER: bool = True
+
+    # Worker Configuration
+
+    CELERY_WORKER_PREFETCH_MULTIPLIER: int = 1
+    CELERY_TASK_ACKS_LATE: bool = True
+    CELERY_TASK_TRACK_STARTED: bool = True
+
+    # Beat
+
+    CELERY_BEAT_SCHEDULE_ENABLED: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

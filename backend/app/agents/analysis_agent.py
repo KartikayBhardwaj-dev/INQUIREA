@@ -4,13 +4,27 @@ from langchain_core.output_parsers import (
 from langchain_core.prompts import (
     ChatPromptTemplate,
 )
+
 from backend.app.agents.base_agent import (
     BaseAgent,
 )
-from backend.app.core.llm import llm
+from backend.app.core.llm import get_llm
+from backend.app.services.llm_service import (
+    llm_service,
+)
 
 
 class AnalysisAgent(BaseAgent):
+    """
+    Performs a single-pass analysis of an email.
+
+    Returns:
+    - Category
+    - Priority
+    - Summary
+    - Reply Required
+    - Extracted Entities
+    """
 
     name = "analysis_agent"
 
@@ -26,71 +40,71 @@ class AnalysisAgent(BaseAgent):
 
         prompt = ChatPromptTemplate.from_template(
             """
-You are an advanced production-grade AI Email Intelligence Engine. 
-Your goal is to perform deep semantic analysis on ONE email, merging its immediate contents with the provided conversational thread history, and returning an actionable data object.
+You are an AI Email Intelligence engine.
 
-=========================
-TARGET EMAIL DATA
-=========================
-Subject: {subject}
-Sender: {sender}
+Analyze the email together with any available thread context.
+
+Return a concise intelligence summary.
+
+Determine:
+
+- Category
+- Priority
+- One concise summary
+- Whether the email requires a reply
+- Important extracted entities
+
+Categories:
+- opportunity
+- deadline
+- finance
+- job
+- internship
+- meeting
+- reply_required
+- promotion
+- automated_notification
+- personal
+- other
+
+Priorities:
+- urgent
+- high
+- medium
+- low
+
+EMAIL
+
+Subject:
+{subject}
+
+Sender:
+{sender}
+
 Body:
 {body}
 
-=========================
-HISTORICAL THREAD CONTEXT
-=========================
+Thread Context:
 {thread_context}
 
-=========================
-CRITICAL METADATA CLASSIFICATION SCHEMAS
-=========================
-
-1. Category Classification Rules (Choose exactly ONE string):
-- "opportunity": New business leads, incoming sales proposals, raw contract discussions, client inquiries.
-- "deadline": Explicit time-sensitive actions, project submissions, regulatory alerts, account expirations.
-- "finance": Statements, invoices, payment confirmations, payroll receipts, structural bank notifications, renewal charges.
-- "job": Employment applications, recruitment follow-ups, interviews, background tracks, offer letters.
-- "internship": Apprenticeship tracks, internship outreach, university-partner coordination.
-- "meeting": Calendar coordination, schedule requests, Zoom links, meeting adjustments, agendas.
-- "reply_required": Casual or operational interpersonal conversations directly requesting a response from the recipient.
-- "promotion": Newsletters, advertising campaigns, mass pricing pitches, product product update announcements.
-- "automated_notification": Transactional logs, password updates, automated tracking reports, platform status checks.
-- "personal": Non-commercial single-sender interpersonal communications (family, close acquaintances, individual peers).
-- "other": Catch-all string constraint. Use ONLY if the email defies all structural parameters above.
-
-2. Priority Level Metrics (Choose exactly ONE string):
-- "urgent": Immediate action required today (e.g. system downtime, missed commitments, same-day adjustments).
-- "high": High-value items, transactional demands, or strict deadlines closing within 48 hours.
-- "medium": Active operational or personal text requiring human attention, but lacking immediate deadlines.
-- "low": Archival data, mass marketing, cold outreach, transactional receipts, or informational logs requiring no immediate attention.
-
-=========================
-STRICT STRUCTURAL OUTPUT SCHEMA
-=========================
-Your output must match this structural JSON syntax exactly. Ensure all fields use the correct primitive types:
+Return ONLY valid JSON.
 
 {{
-    "category": "opportunity | deadline | finance | job | internship | meeting | reply_required | promotion | automated_notification | personal | other",
-    "priority": "low | medium | high | urgent",
-    "summary": "A clear, high-signal summary of this single email's primary intent.",
-    "thread_summary": "A breakdown of the conversation arc. If thread context is empty, duplicate the main summary here.",
-    "extracted_data": {{
-        "dates": ["YYYY-MM-DD format if identifiable, otherwise verbatim text"],
-        "deadlines": ["Identified target completion milestones"],
-        "amounts": ["Extracted numeric currencies or monetary numbers"],
-        "links": ["Valid explicit HTTP urls identified in the body"],
-        "organizations": ["Companies, universities, or brand entities"],
-        "contacts": ["Names, telephone numbers, or explicit email references"],
-        "action_items": ["Granular tasks expected to be completed based on the text"],
-        "requires_reply": false, 
-        "key_facts": ["High-value contextual data points extracted for memory logging"]
+    "category": "",
+    "priority": "",
+    "summary": "",
+    "requires_reply": false,
+    "extracted_entities": {{
+        "organizations": [],
+        "people": [],
+        "dates": [],
+        "action_items": []
     }}
 }}
-
-Return ONLY valid JSON. Do not include markdown code block wrapper markers, prefaces, or side-commentary.
 """
         )
+
+        llm = get_llm()
 
         chain = (
             prompt
@@ -98,13 +112,14 @@ Return ONLY valid JSON. Do not include markdown code block wrapper markers, pref
             | JsonOutputParser()
         )
 
-        result = await chain.ainvoke(
-            {
+        result = await llm_service.ainvoke(
+            chain=chain,
+            inputs={
                 "subject": state["subject"],
                 "sender": state["sender"],
                 "body": state["body"][:3000],
                 "thread_context": thread_context,
-            }
+            },
         )
 
         state["category"] = result.get(
@@ -119,12 +134,13 @@ Return ONLY valid JSON. Do not include markdown code block wrapper markers, pref
             "summary"
         )
 
-        state["thread_summary"] = result.get(
-            "thread_summary"
+        state["requires_reply"] = result.get(
+            "requires_reply",
+            False,
         )
 
-        state["extracted_data"] = result.get(
-            "extracted_data",
+        state["extracted_entities"] = result.get(
+            "extracted_entities",
             {},
         )
 
