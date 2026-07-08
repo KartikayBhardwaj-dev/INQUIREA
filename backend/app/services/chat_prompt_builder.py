@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Any
 
 from backend.app.models.email import Email
 from backend.app.models.email_intelligence import (
@@ -9,105 +10,301 @@ from backend.app.models.email_intelligence import (
 
 class ChatPromptBuilder:
     """
-    Builds production-ready RAG prompts for AI Inbox Chat.
+    Builds production-ready prompts for the AI Inbox Chat.
 
     Responsibilities
     ----------------
     - Format retrieved emails
+    - Format structured metadata
     - Format conversation history
-    - Build the final LLM prompt
+    - Assemble the final RAG prompt
 
-    No retrieval.
-    No database access.
-    No LLM calls.
+    This class performs:
+        ✓ Prompt construction
+        ✓ Formatting
+        ✓ Token management
+
+    This class NEVER performs:
+        ✗ Database access
+        ✗ Retrieval
+        ✗ Vector search
+        ✗ LLM calls
     """
 
     SYSTEM_PROMPT = """
 You are INQUIREA, an AI Email Copilot.
 
-You answer questions ONLY using the retrieved emails provided below.
+You answer questions ONLY using the retrieved emails provided in the context.
 
-Rules:
+====================================================
+PRIMARY RULES
+====================================================
 
-1. Never invent information.
+1. Never invent facts.
 
 2. Never hallucinate.
 
-3. If the answer is not present in the retrieved emails,
-reply exactly:
+3. Never use outside knowledge.
+
+4. If the answer cannot be found in the retrieved emails, reply EXACTLY:
 
 "I couldn't find that information in your inbox."
 
-4. Be concise but complete.
+5. Treat retrieved emails as the only source of truth.
 
-5. When appropriate, cite:
+====================================================
+CONVERSATION RULES
+====================================================
+
+Conversation history is provided only to understand
+the user's current request.
+
+Use previous conversation to resolve references such as:
+
+- those
+- them
+- it
+- only those
+- only recent ones
+- summarize them
+- what about yesterday
+- which require replies
+- same sender
+- same category
+
+Conversation history provides context,
+NOT factual evidence.
+
+Always answer using the retrieved emails.
+
+If previous conversation conflicts with retrieved emails,
+trust the retrieved emails.
+
+Examples
+
+User:
+Show Amazon emails.
+
+Assistant:
+...
+
+User:
+Only recent ones.
+
+Interpretation:
+Only the recent Amazon emails.
+
+--------------------------------
+
+User:
+Summarize those.
+
+Interpretation:
+Summarize the emails retrieved for the previous request.
+
+--------------------------------
+
+User:
+Which require replies?
+
+Interpretation:
+Among the previously discussed emails,
+identify those requiring replies.
+
+--------------------------------
+
+User:
+What about yesterday?
+
+Interpretation:
+Filter the previous context to yesterday's emails.
+
+====================================================
+EMAIL RULES
+====================================================
+
+Each email contains metadata such as:
+
 - Subject
 - Sender
+- Recipient
 - Date
+- Category
+- Priority
+- Summary
+- Extracted Metadata
+- Email Body
 
-6. If multiple emails answer the question,
-summarize them together.
+Use every field whenever helpful.
 
-7. Never mention:
+If multiple emails answer the question:
+
+- combine them
+- summarize them
+- avoid repetition
+
+====================================================
+RESPONSE STYLE
+====================================================
+
+Be:
+
+- concise
+- accurate
+- factual
+- professional
+
+When relevant include:
+
+• Subject
+• Sender
+• Date
+
+Use bullet points whenever multiple emails match.
+
+====================================================
+DO NOT MENTION
+====================================================
+
+Never mention:
+
 - prompts
 - embeddings
+- vector search
 - retrieval
-- vector databases
+- Chroma
+- RAG
 - internal implementation
+- hidden context
 
-Only answer using the retrieved emails.
+====================================================
+FAILURE RULE
+====================================================
+
+If evidence is insufficient:
+
+"I couldn't find that information in your inbox."
 """.strip()
 
     # ---------------------------------------------------------
-    # Email Formatting
+    # Helper Methods
     # ---------------------------------------------------------
 
     @staticmethod
+    def _truncate(
+        text: str | None,
+        limit: int = 1500,
+    ) -> str:
+        """
+        Truncate long text to reduce prompt size.
+        """
+
+        if not text:
+            return ""
+
+        text = text.strip()
+
+        if len(text) <= limit:
+            return text
+
+        return text[:limit].rstrip() + "..."
+
+    @staticmethod
+    def _format_value(
+        value: Any,
+    ) -> str:
+        """
+        Convert None/empty values into a readable placeholder.
+        """
+
+        if value is None:
+            return "Unknown"
+
+        if value == "":
+            return "Unknown"
+
+        return str(value)
+
+    @staticmethod
+    def _format_metadata(
+        extracted_data: dict | None,
+    ) -> str:
+        """
+        Format extracted metadata into a compact,
+        deterministic representation.
+        """
+
+        if not extracted_data:
+            return "None"
+
+        lines: list[str] = []
+
+        for key in sorted(extracted_data.keys()):
+
+            value = extracted_data[key]
+
+            if isinstance(value, list):
+                value = ", ".join(str(v) for v in value)
+
+            elif isinstance(value, dict):
+                value = str(value)
+
+            lines.append(f"{key}: {value}")
+
+        return "\n".join(lines)
+    
+        # ---------------------------------------------------------
+    # Email Formatting
+    # ---------------------------------------------------------
+
+    @classmethod
     def build_email_block(
+        cls,
         email: Email,
         intelligence: EmailIntelligence | None,
     ) -> str:
         """
-        Convert a single email into a prompt-friendly block.
+        Convert a single email into a consistent prompt block.
         """
 
-        category = (
-            intelligence.category
-            if intelligence
-            else "Unknown"
+        category = cls._format_value(
+            intelligence.category if intelligence else None
         )
 
-        priority = (
-            intelligence.priority
-            if intelligence
-            else "Unknown"
+        priority = cls._format_value(
+            intelligence.priority if intelligence else None
         )
 
-        summary = (
-            intelligence.summary
-            if intelligence
-            else ""
+        summary = cls._truncate(
+            intelligence.summary if intelligence else "",
+            limit=500,
         )
 
-        body = (email.body or "").strip()
+        extracted_metadata = cls._format_metadata(
+            intelligence.extracted_data
+            if intelligence
+            else None
+        )
 
-        if len(body) > 2000:
-            body = body[:2000] + "..."
+        body = cls._truncate(
+            email.body,
+            limit=2000,
+        )
 
         return f"""
-EMAIL {email.id}
+EMAIL #{email.id}
 
 Subject:
-{email.subject}
+{cls._format_value(email.subject)}
 
 Sender:
-{email.sender}
+{cls._format_value(email.sender)}
 
 Recipient:
-{email.recipient}
+{cls._format_value(email.recipient)}
 
-Date:
-{email.received_at}
+Received:
+{cls._format_value(email.received_at)}
 
 Category:
 {category}
@@ -117,6 +314,9 @@ Priority:
 
 Summary:
 {summary}
+
+Extracted Metadata:
+{extracted_metadata}
 
 Body:
 {body}
@@ -133,11 +333,11 @@ Body:
         ],
     ) -> str:
         """
-        Build context from retrieved emails.
+        Build a consistent email context section for the prompt.
         """
 
         if not email_data:
-            return "No relevant emails were found."
+            return "No relevant emails were retrieved."
 
         blocks = [
             cls.build_email_block(
@@ -147,50 +347,73 @@ Body:
             for email, intelligence in email_data
         ]
 
-        return "\n\n" + (
-            "\n\n" + "=" * 80 + "\n\n"
-        ).join(blocks)
+        separator = "\n\n" + ("=" * 80) + "\n\n"
 
-    # ---------------------------------------------------------
+        return separator.join(blocks)
+    
+        # ---------------------------------------------------------
     # Conversation Formatting
     # ---------------------------------------------------------
 
-    @staticmethod
+    @classmethod
     def build_conversation_context(
-    history: list[dict],
-) -> str:
+        cls,
+        history: list[dict],
+        max_messages: int = 10,
+    ) -> str:
         """
-        Format the last conversation turns.
+        Format previous conversation turns.
+
+        Features
+        --------
+        - Fixes indentation issues
+        - Supports multi-turn conversations
+        - Keeps only the latest messages
+        - Truncates long messages
+        - Produces a consistent format
         """
 
         if not history:
             return "No previous conversation."
 
-        messages = []
+        recent_messages = history[-max_messages:]
 
-        for message in history:
+        lines: list[str] = []
+
+        for message in recent_messages:
+
             role = (
-        "User"
-        if message["role"] == "user"
-        else "Assistant"
-    )
+                "User"
+                if message.get("role") == "user"
+                else "Assistant"
+            )
 
-        messages.append(
-        f"{role}: {message['message']}"
-    )
+            content = (
+                message.get("content")
+                or message.get("message")
+                or ""
+            )
 
-        return "\n".join(messages)
+            content = cls._truncate(
+                content,
+                limit=500,
+            )
 
-    # ---------------------------------------------------------
-    # Final Prompt
+            lines.append(
+                f"{role}: {content}"
+            )
+
+        return "\n".join(lines)
+        # ---------------------------------------------------------
+    # Final Prompt Assembly
     # ---------------------------------------------------------
 
     @classmethod
     def build_prompt(
-    cls,
-    question: str,
-    conversation: list[dict],
-    email_data: list[
+        cls,
+        question: str,
+        conversation: list[dict],
+        email_data: list[
             tuple[
                 Email,
                 EmailIntelligence | None,
@@ -199,6 +422,13 @@ Body:
     ) -> str:
         """
         Build the final production RAG prompt.
+
+        Prompt Layout
+        -------------
+        1. System instructions
+        2. Previous conversation
+        3. Retrieved email context
+        4. Current user question
         """
 
         conversation_context = cls.build_conversation_context(
@@ -212,25 +442,59 @@ Body:
         return f"""
 {cls.SYSTEM_PROMPT}
 
---------------------------------------------------
-CONVERSATION
---------------------------------------------------
+============================================================
+CONVERSATION HISTORY
+============================================================
 
 {conversation_context}
 
---------------------------------------------------
+============================================================
 RETRIEVED EMAILS
---------------------------------------------------
+============================================================
 
 {email_context}
 
---------------------------------------------------
-QUESTION
---------------------------------------------------
+============================================================
+CURRENT USER QUESTION
+============================================================
 
 {question}
 
---------------------------------------------------
-ANSWER
---------------------------------------------------
+============================================================
+INSTRUCTIONS
+============================================================
+
+Use the conversation history only to understand the
+current question.
+
+If the current question references previous messages
+using words like:
+
+- those
+- them
+- it
+- only recent ones
+- same sender
+- same category
+
+resolve those references using the conversation history,
+but answer ONLY from the retrieved emails.
+
+Never use conversation history as evidence.
+
+If the retrieved emails do not contain enough information,
+reply exactly:
+
+I couldn't find that information in your inbox.
+
+When multiple emails match:
+
+• combine them
+• summarize them
+• avoid repetition
+
+Mention Subject, Sender and Date whenever useful.
+
+Never mention prompts, retrieval,
+vector search, embeddings or internal implementation.
 """.strip()

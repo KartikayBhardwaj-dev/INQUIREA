@@ -1,21 +1,14 @@
-from fastapi import APIRouter
-from fastapi import Depends
+from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend.app.auth.dependencies import (
-    get_current_user,
-)
-from backend.app.database.session import (
-    SessionLocal,
-)
+from backend.app.auth.dependencies import get_current_user
+from backend.app.database.session import SessionLocal
 from backend.app.schemas.chat import (
     ChatRequest,
     ChatResponse,
     ConversationHistory,
 )
-from backend.app.services.inbox_chat_service import (
-    InboxChatService,
-)
+from backend.app.services.inbox_chat_service import InboxChatService
 
 router = APIRouter(
     prefix="/chat",
@@ -26,7 +19,6 @@ router = APIRouter(
 # ---------------------------------------------------------
 # Database Dependency
 # ---------------------------------------------------------
-
 
 def get_db():
     db = SessionLocal()
@@ -41,7 +33,6 @@ def get_db():
 # Start New Conversation
 # ---------------------------------------------------------
 
-
 @router.post(
     "",
     response_model=ChatResponse,
@@ -55,16 +46,15 @@ async def chat(
     service = InboxChatService(db)
 
     return await service.chat(
-    user_id=current_user["user_id"],
-    question=request.message,
-    conversation_id=request.conversation_id,
-)
+        user_id=current_user["user_id"],
+        question=request.message,
+        conversation_id=request.conversation_id,
+    )
 
 
 # ---------------------------------------------------------
-# Continue Conversation
+# Continue Existing Conversation
 # ---------------------------------------------------------
-
 
 @router.post(
     "/{conversation_id}",
@@ -80,22 +70,21 @@ async def continue_chat(
     service = InboxChatService(db)
 
     return await service.chat(
-    user_id=current_user["user_id"],
-    question=request.message,
-    conversation_id=conversation_id,
-)
+        user_id=current_user["user_id"],
+        question=request.message,
+        conversation_id=conversation_id,
+    )
 
 
 # ---------------------------------------------------------
 # Conversation History
 # ---------------------------------------------------------
 
-
 @router.get(
     "/history/{conversation_id}",
     response_model=ConversationHistory,
 )
-def conversation_history(
+async def conversation_history(
     conversation_id: str,
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -115,22 +104,46 @@ def conversation_history(
 
 
 # ---------------------------------------------------------
-# List Conversations
+# List User Conversations
 # ---------------------------------------------------------
-
 
 @router.get(
     "/conversations",
+    response_model=list[str],
 )
-def conversations(
+async def conversations(
     current_user=Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
 
     service = InboxChatService(db)
 
+    return service.list_conversations(
+        user_id=current_user["user_id"],
+    )
+
+
+# ---------------------------------------------------------
+# Delete Conversation
+# ---------------------------------------------------------
+
+@router.delete(
+    "/{conversation_id}",
+)
+async def delete_conversation(
+    conversation_id: str,
+    current_user=Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+
+    service = InboxChatService(db)
+
+    service.delete_conversation(
+        conversation_id=conversation_id,
+        user_id=current_user["user_id"],
+    )
+
     return {
-        "conversations": service.list_conversations(
-            user_id=current_user["user_id"],
-        )
+        "success": True,
+        "conversation_id": conversation_id,
     }

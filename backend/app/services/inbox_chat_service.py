@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import logging
 import uuid
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.app.agents.chat_agent import ChatAgent
 from backend.app.models.chat_history import ChatHistory
 from backend.app.schemas.chat import ChatResponse
+
+logger = logging.getLogger(__name__)
 
 
 class InboxChatService:
@@ -15,12 +19,14 @@ class InboxChatService:
 
     Responsibilities
     ----------------
-    - Manage conversations
+    - Create conversations
+    - Load conversation memory
     - Persist chat history
-    - Retrieve conversation memory
     - Call ChatAgent
     - Return structured responses
     """
+
+    HISTORY_LIMIT = 8
 
     def __init__(
         self,
@@ -28,6 +34,70 @@ class InboxChatService:
     ):
         self.db = db
         self.agent = ChatAgent(db)
+
+    # ---------------------------------------------------------
+    # Conversation Memory
+    # ---------------------------------------------------------
+
+    def _load_conversation(
+        self,
+        conversation_id: str,
+        user_id: int,
+    ) -> list[dict]:
+        """
+        Load the most recent conversation turns
+        in chronological order.
+        """
+
+        rows = (
+            self.db.query(ChatHistory)
+            .filter(
+                ChatHistory.conversation_id == conversation_id,
+                ChatHistory.user_id == user_id,
+            )
+            .order_by(ChatHistory.created_at.desc())
+            .limit(self.HISTORY_LIMIT)
+            .all()
+        )
+
+        rows.reverse()
+
+        logger.debug(
+            "Loaded %d conversation messages.",
+            len(rows),
+        )
+
+        return [
+            {
+                "role": row.role,
+                "message": row.message,
+            }
+            for row in rows
+        ]
+
+    # ---------------------------------------------------------
+    # Persistence
+    # ---------------------------------------------------------
+
+    def _save_message(
+        self,
+        conversation_id: str,
+        user_id: int,
+        role: str,
+        message: str,
+    ) -> None:
+        """
+        Persist one conversation message.
+        """
+
+        self.db.add(
+            ChatHistory(
+                conversation_id=conversation_id,
+                user_id=user_id,
+                role=role,
+                message=message,
+            )
+        )
 
     # ---------------------------------------------------------
     # Main Entry Point
@@ -40,83 +110,74 @@ class InboxChatService:
         conversation_id: str | None = None,
     ) -> ChatResponse:
         """
-        Process one inbox chat request.
+        Process one AI Inbox Chat request.
         """
 
         if conversation_id is None:
             conversation_id = str(uuid.uuid4())
 
-        # -----------------------------------------------------
-        # Load previous conversation (Step 12)
-        # -----------------------------------------------------
-
-        history_rows = (
-            self.db.query(ChatHistory)
-            .filter(
-                ChatHistory.conversation_id == conversation_id,
-                ChatHistory.user_id == user_id,
+            logger.info(
+                "Created conversation %s",
+                conversation_id,
             )
-            .order_by(ChatHistory.created_at.desc())
-            .limit(8)
-            .all()
+
+        conversation = self._load_conversation(
+            conversation_id=conversation_id,
+            user_id=user_id,
         )
 
-        history_rows.reverse()
+        try:
 
-        conversation = [
-            {
-                "role": row.role,
-                "message": row.message,
-            }
-            for row in history_rows
-        ]
+            result = await self.agent.chat(
+                question=question,
+                conversation=conversation,
+            )
 
-        # -----------------------------------------------------
-        # Call Chat Agent
-        # -----------------------------------------------------
+        except Exception:
 
-        result = await self.agent.chat(
-            question=question,
-            conversation=conversation,
-        )
+            logger.exception(
+                "ChatAgent execution failed."
+            )
+            raise
 
-        # -----------------------------------------------------
-        # Persist User Message
-        # -----------------------------------------------------
+        try:
 
-        self.db.add(
-            ChatHistory(
+            self._save_message(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 role="user",
                 message=question,
             )
-        )
 
-        # -----------------------------------------------------
-        # Persist Assistant Message
-        # -----------------------------------------------------
-
-        self.db.add(
-            ChatHistory(
+            self._save_message(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 role="assistant",
                 message=result["answer"],
             )
-        )
 
-        self.db.commit()
+            self.db.commit()
 
-        # -----------------------------------------------------
-        # API Response (Step 14)
-        # -----------------------------------------------------
+            logger.debug(
+                "Conversation committed."
+            )
+
+        except Exception:
+
+            self.db.rollback()
+
+            logger.exception(
+                "Failed to persist conversation."
+            )
+
+            raise
 
         return ChatResponse(
             conversation_id=conversation_id,
             answer=result["answer"],
-            sources=result["emails"],
-            emails_found=len(result["emails"]),
+            sources=result["sources"],
+            emails_found=result["emails_found"],
+            retrieved_emails=result["retrieved_emails"],
             query_plan=result["query_plan"],
         )
 
@@ -130,7 +191,7 @@ class InboxChatService:
         user_id: int,
     ) -> list[ChatHistory]:
         """
-        Return all messages in a conversation.
+        Return a complete conversation.
         """
 
         return (
@@ -152,7 +213,7 @@ class InboxChatService:
         user_id: int,
     ) -> list[str]:
         """
-        Return all conversation IDs for a user.
+        Return every conversation owned by the user.
         """
 
         rows = (
@@ -179,13 +240,30 @@ class InboxChatService:
         Delete an entire conversation.
         """
 
-        (
-            self.db.query(ChatHistory)
-            .filter(
-                ChatHistory.conversation_id == conversation_id,
-                ChatHistory.user_id == user_id,
-            )
-            .delete()
-        )
+        try:
 
-        self.db.commit()
+            (
+                self.db.query(ChatHistory)
+                .filter(
+                    ChatHistory.conversation_id == conversation_id,
+                    ChatHistory.user_id == user_id,
+                )
+                .delete()
+            )
+
+            self.db.commit()
+
+            logger.info(
+                "Deleted conversation %s",
+                conversation_id,
+            )
+
+        except Exception:
+
+            self.db.rollback()
+
+            logger.exception(
+                "Failed to delete conversation."
+            )
+
+            raise
