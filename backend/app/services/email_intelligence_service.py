@@ -14,8 +14,8 @@ from backend.app.models.email_intelligence import (
 from backend.app.models.workflow_run import WorkflowRun
 
 
-from backend.app.tasks.embedding_tasks import (
-    generate_embedding,
+from backend.app.services.vector_memory_service import (
+    VectorMemoryService,
 )
 
 logger = logging.getLogger(__name__)
@@ -129,15 +129,15 @@ class EmailIntelligenceService:
                     "summary",
                 ),
                 extracted_data={
-                    "requires_reply": output.get(
-                        "requires_reply",
-                        False,
-                    ),
-                    "entities": output.get(
-                        "extracted_entities",
-                        {},
-                    ),
-                },
+    "requires_reply": output.get(
+        "requires_reply",
+        False,
+    ),
+    "extracted_entities": output.get(
+        "extracted_entities",
+        {},
+    ),
+},
                 tags=[],
                 confidence=1.0,
                 processed_at=datetime.utcnow(),
@@ -156,9 +156,19 @@ class EmailIntelligenceService:
 
             db.commit()
 
-            generate_embedding.delay(
-                email.id,
-            )
+            try:
+
+                VectorMemoryService.index_email(
+        db=db,
+        email_id=email.id,
+    )
+
+            except Exception:
+
+                logger.exception(
+        "Failed creating embedding for email %s",
+        email.id,
+    )
 
             return intelligence
 

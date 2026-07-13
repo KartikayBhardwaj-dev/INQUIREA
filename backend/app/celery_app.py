@@ -33,7 +33,6 @@ celery_app.conf.update(
 
     include=[
         "backend.app.tasks.email_tasks",
-        "backend.app.tasks.embedding_tasks",
     ],
 
     beat_schedule={},

@@ -4,7 +4,3 @@ from .email_tasks import (
     retry_failed_email,
 )
 
-from .embedding_tasks import (
-    generate_embedding,
-    generate_embedding_batch,
-)

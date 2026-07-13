@@ -2,9 +2,11 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from backend.app.memory.vector_store import vector_store
 from backend.app.models.email import Email
 from backend.app.models.email_intelligence import EmailIntelligence
+from backend.app.repositories.email_embedding_repository import (
+    EmailEmbeddingRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -13,12 +15,25 @@ class VectorMemoryService:
     """
     Business layer for semantic email memory.
 
-    PostgreSQL = Source of Truth
-    ChromaDB = Semantic Index
+    Architecture
+    ------------
+    PostgreSQL
+        ├── emails
+        ├── email_intelligence
+        └── email_embeddings (pgvector)
 
-    Documents are built from the persisted EmailIntelligence
-    generated during the simplified ingestion pipeline.
+    Responsibilities
+    ----------------
+    - Build semantic documents
+    - Build embedding metadata
+    - Coordinate embedding repository
+    - Rebuild semantic index
+    - Semantic search
     """
+
+    # ---------------------------------------------------------
+    # Document Builder
+    # ---------------------------------------------------------
 
     @staticmethod
     def _build_document(
@@ -26,87 +41,167 @@ class VectorMemoryService:
         intelligence: EmailIntelligence | None,
     ) -> str:
         """
-        Build the semantic document stored in Chroma.
+        Build the semantic document stored inside pgvector.
         """
 
-        entities = []
-        reply_required = False
+        summary = ""
+        category = ""
+        priority = ""
 
-        if intelligence and intelligence.extracted_data:
+        requires_reply = False
 
-            entities = intelligence.extracted_data.get(
-                "entities",
-                [],
-            )
+        organizations: list[str] = []
+        people: list[str] = []
+        dates: list[str] = []
+        action_items: list[str] = []
 
-            reply_required = intelligence.extracted_data.get(
-                "reply_required",
-                False,
-            )
+        if intelligence:
+
+            summary = intelligence.summary or ""
+            category = intelligence.category or ""
+            priority = intelligence.priority or ""
+
+            extracted = intelligence.extracted_data or {}
+
+            requires_reply = extracted.get(
+        "requires_reply",
+        False,
+    )
+
+            entities = extracted.get(
+        "extracted_entities",
+        {},
+    )
+
+            organizations = entities.get(
+        "organizations",
+        [],
+    )
+
+            people = entities.get(
+        "people",
+        [],
+    )
+
+            dates = entities.get(
+        "dates",
+        [],
+    )
+
+            action_items = entities.get(
+        "action_items",
+        [],
+    )
 
         return f"""
 Subject:
 {email.subject or ""}
 
 Summary:
-{intelligence.summary if intelligence else ""}
+{summary}
 
 Category:
-{intelligence.category if intelligence else ""}
+{category}
 
 Priority:
-{intelligence.priority if intelligence else ""}
+{priority}
 
-Reply Required:
-{reply_required}
+Requires Reply:
+{requires_reply}
 
-Entities:
-{", ".join(entities)}
+Organizations:
+{", ".join(organizations)}
+
+People:
+{", ".join(people)}
+
+Dates:
+{", ".join(dates)}
+
+Action Items:
+{", ".join(action_items)}
+
+Sender:
+{email.sender or ""}
+
+Recipient:
+{email.recipient or ""}
 
 Email Body:
 {email.body or ""}
 """.strip()
 
+    # ---------------------------------------------------------
+    # Metadata Builder
+    # ---------------------------------------------------------
+
     @staticmethod
     def _build_metadata(
-        email: Email,
-        intelligence: EmailIntelligence | None,
-    ) -> dict:
+    email: Email,
+    intelligence: EmailIntelligence | None,
+) -> dict:
         """
-        Metadata stored alongside the vector.
-        """
+    Lightweight metadata stored with the embedding.
 
-        reply_required = False
+    Used for metadata filtering during semantic search.
+    """
 
-        if intelligence and intelligence.extracted_data:
-            reply_required = intelligence.extracted_data.get(
-                "reply_required",
-                False,
-            )
+        category = None
+        priority = None
+        requires_reply = False
+
+        organizations: list[str] = []
+        people: list[str] = []
+
+        if intelligence:
+
+            category = intelligence.category
+            priority = intelligence.priority
+
+            extracted = intelligence.extracted_data or {}
+
+            requires_reply = extracted.get(
+            "requires_reply",
+            False,
+        )
+
+            entities = extracted.get(
+            "extracted_entities",
+            {},
+        )
+
+            organizations = entities.get(
+            "organizations",
+            [],
+        )
+
+            people = entities.get(
+            "people",
+            [],
+        )
 
         return {
-            "email_id": email.id,
-            "thread_id": email.gmail_thread_id,
-            "user_id": email.user_id,
-            "sender": email.sender,
-            "recipient": email.recipient,
-            "date": (
-                email.received_at.isoformat()
-                if email.received_at
-                else None
-            ),
-            "category": (
-                intelligence.category
-                if intelligence
-                else None
-            ),
-            "priority": (
-                intelligence.priority
-                if intelligence
-                else None
-            ),
-            "reply_required": reply_required,
-        }
+        "email_id": email.id,
+        "user_id": email.user_id,
+        "thread_id": email.gmail_thread_id,
+        "sender": email.sender,
+        "recipient": email.recipient,
+        "subject": email.subject,
+        "category": category,
+        "priority": priority,
+        "requires_reply": requires_reply,
+        "organizations": organizations,
+        "people": people,
+        "received_at": (
+            email.received_at.isoformat()
+            if email.received_at
+            else None
+        ),
+    }
+    
+        # ---------------------------------------------------------
+    # Batch Builder
+    # ---------------------------------------------------------
 
     @classmethod
     def build_batch(
@@ -115,7 +210,18 @@ Email Body:
         email_ids: list[int],
     ) -> list[dict]:
         """
-        Build vector documents for a batch of emails.
+        Build embedding documents for a batch of emails.
+
+        Returns
+        -------
+        [
+            {
+                "email_id": int,
+                "document": str,
+                "metadata": dict,
+            },
+            ...
+        ]
         """
 
         if not email_ids:
@@ -124,7 +230,7 @@ Email Body:
         emails = (
             db.query(Email)
             .filter(
-                Email.id.in_(email_ids)
+                Email.id.in_(email_ids),
             )
             .all()
         )
@@ -135,9 +241,11 @@ Email Body:
         }
 
         intelligence_rows = (
-            db.query(EmailIntelligence)
+            db.query(
+                EmailIntelligence,
+            )
             .filter(
-                EmailIntelligence.email_id.in_(email_ids)
+                EmailIntelligence.email_id.in_(email_ids),
             )
             .all()
         )
@@ -147,19 +255,19 @@ Email Body:
             for row in intelligence_rows
         }
 
-        items = []
+        items: list[dict] = []
 
         for email_id in email_ids:
 
             email = email_lookup.get(
-                email_id
+                email_id,
             )
 
             if email is None:
                 continue
 
             intelligence = intelligence_lookup.get(
-                email_id
+                email_id,
             )
 
             document = cls._build_document(
@@ -183,32 +291,45 @@ Email Body:
 
         return items
 
+    # ---------------------------------------------------------
+    # Index One Email
+    # ---------------------------------------------------------
+
     @classmethod
-    def add_email(
+    def index_email(
         cls,
         db: Session,
         email_id: int,
-    ) -> None:
+    ) -> int:
         """
-        Index a single email.
+        Create or update the embedding for a single email.
+
+        Returns
+        -------
+        1 if indexed, otherwise 0.
         """
 
-        cls.add_batch(
+        return cls.index_batch(
             db=db,
             email_ids=[email_id],
         )
 
+    # ---------------------------------------------------------
+    # Batch Index
+    # ---------------------------------------------------------
+
     @classmethod
-    def add_batch(
+    def index_batch(
         cls,
         db: Session,
         email_ids: list[int],
     ) -> int:
         """
-        Batch index multiple emails.
+        Create or update embeddings for multiple emails.
 
-        Returns:
-            Number of indexed emails.
+        Returns
+        -------
+        Number of indexed emails.
         """
 
         items = cls.build_batch(
@@ -217,41 +338,94 @@ Email Body:
         )
 
         if not items:
+
             logger.info(
-                "No emails available for vector indexing."
+                "No emails available for embedding."
             )
+
             return 0
 
-        vector_store.upsert_many(
-            items=items,
-        )
+        repository = EmailEmbeddingRepository(
+    db,
+)
+
+        try:
+            repository.upsert_many(
+        items=items,
+    )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
 
         logger.info(
-            "Indexed %s email(s) into Chroma.",
-            len(items),
-        )
+    "Indexed %s email(s) into pgvector.",
+    len(items),
+)
 
         return len(items)
+    
+        # ---------------------------------------------------------
+    # Update
+    # ---------------------------------------------------------
 
     @classmethod
     def update_email(
         cls,
         db: Session,
         email_id: int,
-    ) -> None:
-        cls.add_email(
+    ) -> int:
+        """
+        Rebuild the embedding for an existing email.
+
+        Since the repository performs an UPSERT,
+        updating is identical to indexing.
+        """
+
+        return cls.index_email(
             db=db,
             email_id=email_id,
         )
 
+    # ---------------------------------------------------------
+    # Delete
+    # ---------------------------------------------------------
+
     @classmethod
     def delete_email(
         cls,
+        db: Session,
         email_id: int,
     ) -> None:
-        vector_store.delete(
-            email_id,
-        )
+        """
+        Remove an email embedding from pgvector.
+        """
+
+        repository = EmailEmbeddingRepository(
+    db,
+)
+
+        try:
+            repository.delete(
+            email_id=email_id,
+    )
+
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+        logger.info(
+    "Deleted embedding for email %s.",
+    email_id,
+)
+
+    # ---------------------------------------------------------
+    # Semantic Search
+    # ---------------------------------------------------------
 
     @classmethod
     def similarity_search(
@@ -261,41 +435,35 @@ Email Body:
         limit: int = 5,
     ) -> list[Email]:
         """
-        Retrieve similar emails using Chroma and return
-        the corresponding Email models.
+        Perform semantic retrieval using pgvector.
+
+        Returns
+        -------
+        List[Email]
+
+        The Email objects are returned in the same
+        similarity order produced by pgvector.
         """
 
-        matches = vector_store.similarity_search(
-            query=query,
-            limit=limit,
+        repository = EmailEmbeddingRepository(
+            db,
         )
 
-        email_ids = [
-            item["email_id"]
-            for item in matches
-        ]
+        matches = repository.similarity_search(
+        query=query,
+        limit=limit,
+)
 
-        if not email_ids:
-            return []
+        logger.debug(
+    "Semantic search returned %s emails.",
+    len(matches),
+)
 
-        emails = (
-            db.query(Email)
-            .filter(
-                Email.id.in_(email_ids),
-            )
-            .all()
-        )
-
-        lookup = {
-            email.id: email
-            for email in emails
-        }
-
-        return [
-            lookup[email_id]
-            for email_id in email_ids
-            if email_id in lookup
-        ]
+        return matches
+    
+        # ---------------------------------------------------------
+    # Rebuild Entire Vector Index
+    # ---------------------------------------------------------
 
     @classmethod
     def reindex_all(
@@ -303,23 +471,64 @@ Email Body:
         db: Session,
     ) -> int:
         """
-        Rebuild the entire Chroma collection.
+        Rebuild the entire pgvector index.
+
+        This operation:
+
+        1. Removes every existing embedding.
+        2. Loads all emails.
+        3. Recreates every embedding.
+
+        Returns
+        -------
+        Number of indexed emails.
         """
 
-        emails = (
-            db.query(Email)
-            .order_by(
-                Email.id,
-            )
-            .all()
+        repository = EmailEmbeddingRepository(
+            db,
         )
+
+        logger.info(
+    "Starting full pgvector reindex.",
+)
+
+        try:
+            repository.reset()
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
+
+        emails = (
+    db.query(Email)
+    .order_by(
+        Email.id.asc(),
+    )
+    .all()
+)
+
+        if not emails:
+
+            logger.info(
+                "No emails found for reindex."
+            )
+
+            return 0
 
         email_ids = [
             email.id
             for email in emails
         ]
 
-        return cls.add_batch(
+        indexed = cls.index_batch(
             db=db,
             email_ids=email_ids,
         )
+
+        logger.info(
+            "Finished pgvector reindex (%s emails).",
+            indexed,
+        )
+
+        return indexed

@@ -13,3 +13,5 @@ from backend.app.models.chat_history import ChatHistory
 from backend.app.models.email_intelligence import (
     EmailIntelligence,
 )
+
+from backend.app.models.email_embedding import EmailEmbedding

@@ -21,33 +21,44 @@ class EmailIntelligence(Base):
     email_id: Mapped[int] = mapped_column(
         ForeignKey("emails.id"),
         unique=True,
-        index=True
+        index=True,
     )
 
-    category: Mapped[str | None]
+    # Frequently filtered
+    category: Mapped[str | None] = mapped_column(
+        index=True,
+    )
 
-    priority: Mapped[str | None]
+    # Frequently filtered
+    priority: Mapped[str | None] = mapped_column(
+        index=True,
+    )
 
     summary: Mapped[str | None] = mapped_column(
-        Text
+        Text,
     )
 
+    # Stores metadata such as:
+    # {
+    #     "requires_reply": true,
+    #     ...
+    # }
     extracted_data: Mapped[dict | None] = mapped_column(
-        JSON
+        JSON,
     )
 
     tags: Mapped[list | None] = mapped_column(
         JSON,
-        default=list
+        default=list,
     )
 
     confidence: Mapped[float | None]
 
     processed_at: Mapped[datetime | None] = mapped_column(
-        DateTime
+        DateTime,
     )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow
+        default=datetime.utcnow,
     )
