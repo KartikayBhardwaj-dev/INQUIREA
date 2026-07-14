@@ -305,9 +305,6 @@
 #             "retrieved_emails": retrieved_emails,
 #             "query_plan": plan.model_dump(),
 #         }
-
-
-
 from __future__ import annotations
 import logging
 from sqlalchemy.orm import Session
@@ -345,7 +342,13 @@ class ChatAgent:
             )
         except Exception:
             logger.exception("Query planner failed.")
-            raise
+            return {
+                "answer": "I ran into an issue planning your request. Please try rephrasing your question.",
+                "sources": [],
+                "emails_found": 0,
+                "retrieved_emails": [],
+                "query_plan": {},
+            }
 
         logger.info("Query plan generated: %s", plan.model_dump())
 
@@ -372,7 +375,13 @@ class ChatAgent:
             )
         except Exception:
             logger.exception("Email retrieval failed.")
-            raise
+            return {
+                "answer": "I encountered an error looking up your emails. Let's try that search again in a moment.",
+                "sources": [],
+                "emails_found": 0,
+                "retrieved_emails": [],
+                "query_plan": plan.model_dump(),
+            }
 
         logger.info("Retrieved %d email(s).", len(emails))
 
@@ -384,8 +393,6 @@ class ChatAgent:
 
         for email, intelligence in email_data:
             extracted = intelligence.extracted_data if intelligence and intelligence.extracted_data else {}
-            
-            # Use safe unified check variant for entities extraction
             entities = extracted.get("extracted_entities", extracted.get("entities", {}))
 
             retrieved_emails.append(
@@ -405,12 +412,42 @@ class ChatAgent:
             )
 
         # ---------------------------------------------------------
-        # Step 5 — Handle Empty Retrieval
+        # Step 5 — Handle Empty Retrieval (Dynamic LLM Fallback Engine)
         # ---------------------------------------------------------
         if not emails:
-            logger.info("No matching emails found.")
+            logger.info("No matching emails found. Triggering dynamic empty-state agent evaluation.")
+            llm = get_llm()
+            
+            fallback_prompt = f"""
+            You are INQUIREA, an AI Email Copilot. The user asked a question, but the database search filters returned 0 results.
+            Analyze the user's current request and the intended filters below to formulate a helpful response confirming that no matching emails exist.
+            
+            USER QUESTION: "{question}"
+            INTENDED FILTERS TRIGGERED:
+            - Category Filter: {plan.category}
+            - Priority Filter: {plan.priority}
+            - Explicit Sender Filter: {plan.sender}
+            - Requires Reply Mandatory: {plan.requires_reply}
+            
+            CRITICAL FORMATTING INSTRUCTION:
+            Output ONLY the direct response to the user. 
+            Do NOT include conversational introductions, behind-the-scenes thoughts, meta-commentary, introductory phrases like "Here is the response:", or any reasoning. Speak directly to the user.
+            
+            INSTRUCTIONS:
+            1. If the user asked a confirmation question (e.g., "what needs a reply?", "any high priority updates?"), answer politely explaining that they are all caught up or that no emails match those specific filters right now.
+            2. If the user asked for out-of-bounds metrics (e.g., weather, cooking recipes) or items completely missing from their history, reply exactly: "I couldn't find that information in your inbox."
+            3. Keep the voice natural, short, and highly accurate to the filters.
+            """.strip()
+            
+            try:
+                response = await llm.ainvoke(fallback_prompt)
+                answer = response.content if hasattr(response, "content") else str(response)
+            except Exception:
+                logger.exception("Fallback LLM invocation failed.")
+                answer = "I couldn't find that information in your inbox."
+
             return {
-                "answer": "I couldn't find that information in your inbox.",
+                "answer": answer.strip(),
                 "sources": [],
                 "emails_found": 0,
                 "retrieved_emails": [],
@@ -436,7 +473,7 @@ class ChatAgent:
         except Exception:
             logger.exception("LLM invocation failed.")
             return {
-                "answer": "Sorry, I couldn't process your request right now.",
+                "answer": "Sorry, I ran into an error while processing your email context records.",
                 "sources": [email.id for email in emails],
                 "emails_found": len(emails),
                 "retrieved_emails": retrieved_emails,
