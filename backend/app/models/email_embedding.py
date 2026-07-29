@@ -1,14 +1,8 @@
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
-
-from sqlalchemy import DateTime
-from sqlalchemy import ForeignKey
-from sqlalchemy import JSON
-from sqlalchemy import Text
-
-from sqlalchemy.orm import Mapped
-from sqlalchemy.orm import mapped_column
+from sqlalchemy import DateTime, ForeignKey, JSON, Text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from backend.app.database.base import Base
 
@@ -16,16 +10,15 @@ from backend.app.database.base import Base
 class EmailEmbedding(Base):
     """
     Semantic embedding for an email.
-
-    PostgreSQL is the source of truth.
-
-    One email -> One embedding.
+    PostgreSQL + pgvector is the source of truth.
+    One email -> One embedding record.
     """
 
     __tablename__ = "email_embeddings"
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
+        autoincrement=True,
     )
 
     email_id: Mapped[int] = mapped_column(
@@ -35,10 +28,12 @@ class EmailEmbedding(Base):
         ),
         unique=True,
         index=True,
+        nullable=False,
     )
 
+    # Adjustable vector dimensions (defaults to 1536 for standard embeddings)
     embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(384),
+        Vector(1536),
         nullable=False,
     )
 

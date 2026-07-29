@@ -17,24 +17,18 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
-
     timezone="UTC",
     enable_utc=True,
-
     task_acks_late=True,
     task_reject_on_worker_lost=True,
     worker_prefetch_multiplier=1,
-
     task_track_started=True,
     task_time_limit=600,
     task_soft_time_limit=540,
-
     result_expires=3600,
-
     include=[
         "backend.app.tasks.email_tasks",
     ],
-
     beat_schedule={},
 )
 
@@ -50,9 +44,8 @@ celery_app.autodiscover_tasks(
 @worker_process_init.connect
 def initialize_worker(**kwargs):
     """
-    Runs once in every Celery worker process.
+    Runs once in every Celery worker process to boot agents and tools.
     """
     register_tools()
     register_agents()
-
-    print("✓ Celery worker initialized")
+    print("✓ Celery worker initialized successfully.")
