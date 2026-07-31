@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from pydantic import ConfigDict
 import logging
 from typing import Any, Literal
 from pydantic import BaseModel, Field
@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 class QueryPlan(BaseModel):
+    model_config = ConfigDict(extra="ignore")
     intent: Literal[
         "semantic_search",
         "summarize",
@@ -37,7 +38,10 @@ class QueryPlan(BaseModel):
     sort_by: Literal["relevance", "date", "priority"] = Field(default="relevance", description="Sorting strategy.")
     date_from: str | None = Field(default=None, description="Inclusive ISO date lower bound.")
     date_to: str | None = Field(default=None, description="Inclusive ISO date upper bound.")
-    reasoning: str = Field(description="Short explanation of the chosen retrieval plan.")
+    reasoning: str = Field(
+    default="",
+    description="Short explanation..."
+)
     
     needs_tool: bool = Field(
         default=False,
@@ -47,10 +51,11 @@ class QueryPlan(BaseModel):
         default=None,
         description="Registered tool name to execute."
     )
-    tool_arguments: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Arguments passed to the selected tool.",
-    )
+    tool_arguments: dict[str, Any] | None = Field(
+    default_factory=dict
+)
+    needs_clarification: bool = False
+    clarification_message: str | None = None
 
 
 class QueryPlanner:
@@ -108,7 +113,9 @@ Map priority precisely or default to null. Map `requires_reply` to true if the p
 ========================================================
 LEVEL 2 TOOL ROUTING
 ========================================================
+
 If the user's request is asking to PERFORM an action rather than retrieve information, set:
+
 needs_tool = true
 
 Available tools:
@@ -123,14 +130,104 @@ Available tools:
 - update_draft
 - send_reply
 
-Examples:
-- "Generate a reply for email 25" -> tool_name = "generate_reply", tool_arguments = {{"email_id": 25, "tone": "professional"}}
-- "Rewrite this politely" -> tool_name = "rewrite_reply", tool_arguments = {{"tone": "friendly"}}
-- "Save draft 12" -> tool_name = "save_draft", tool_arguments = {{"draft_id": 12}}
-- "Update draft 12" -> tool_name = "update_draft", tool_arguments = {{"draft_id": 12}}
-- "Send draft 12" -> tool_name = "send_reply", tool_arguments = {{"draft_id": 12}}
+IMPORTANT ID RULES
 
-Default tone for replies is "professional".
+• NEVER invent an email_id.
+• NEVER invent a draft_id.
+• Priority 1:
+Use IDs mentioned in the CURRENT USER QUESTION.
+
+Priority 2:
+If the current question does not contain an ID,
+look in the conversation history.
+
+Only if neither contains an ID,
+return tool_arguments = {{{{}}}} and
+needs_clarification = true.
+• If no valid ID can be determined, return tool_arguments as  an empty JSON object
+• Never copy IDs from these instructions.
+
+Examples
+
+User:
+Generate a reply for email <email_id>
+
+Output:
+tool_name = "generate_reply"
+tool_arguments = {{{{
+    "email_id": <email_id>,
+    "tone": "professional"
+}}}}
+
+User:
+Rewrite this politely
+
+Output:
+tool_name = "rewrite_reply"
+tool_arguments = {{{{
+    "tone": "friendly"
+}}}}
+
+User:
+Save draft <draft_id>
+
+Output:
+tool_name = "save_draft"
+tool_arguments = {{{{
+    "draft_id": <draft_id>
+}}}}
+
+User:
+Update draft <draft_id>
+
+Output:
+tool_name = "update_draft"
+tool_arguments = {{{{
+    "draft_id": <draft_id>
+}}}}
+
+User:
+Send draft <draft_id>
+
+Output:
+tool_name = "send_reply"
+tool_arguments = {{{{
+    "draft_id": <draft_id>
+}}}}
+
+User:
+Approve draft 15
+
+Output:
+tool_name = "approve_draft"
+tool_arguments = {{{{
+    "draft_id": 15
+}}}}
+
+User:
+Approve draft_reply_id 15
+
+Output:
+tool_name = "approve_draft"
+tool_arguments = {{{{
+    "draft_id": 15
+}}}}
+
+User:
+Reject draft 15
+
+Output:
+tool_name = "reject_draft"
+tool_arguments = {{{{
+    "draft_id": 15
+}}}}
+If the conversation contains the draft ID, reuse it.
+
+
+tool_arguments = {{{{}}}}
+
+Default tone is "professional".
+
 
 ========================================================
 RETRIEVE LIMIT & SORTING RULES
@@ -139,6 +236,20 @@ Default: sort_by = relevance. If the user requests latest/recent -> sort_by = da
 Limits: normal/metadata = 5, sender/deadline = 10, summarize = 20.
 
 {{format_instructions}}
+
+IMPORTANT
+
+Do NOT create nested objects.
+
+Do NOT output keys not defined in the schema.
+
+Every field must exist at the top level.
+
+If tool_arguments is unused, return an empty JSON object.
+
+reasoning must always be present.
+
+Return ONLY the JSON object.
 """,
                 ),
                 ("user", "Conversation History:\n{conversation_history}\n\nCurrent Question: {question}"),
@@ -162,8 +273,13 @@ Limits: normal/metadata = 5, sender/deadline = 10, summarize = 20.
                     "conversation_history": history_str,
                 }
             )
-        except Exception:
+            plan.reasoning = plan.reasoning or ""
+
+            plan.tool_arguments = plan.tool_arguments or {}
+        except Exception as e:
             logger.exception("Failed to parse QueryPlan from LLM response.")
+
+            logger.exception(e)
             return QueryPlan(
                 intent="semantic_search",
                 semantic_query=question,
@@ -234,19 +350,41 @@ Limits: normal/metadata = 5, sender/deadline = 10, summarize = 20.
         if plan.tool_name:
             plan.tool_name = plan.tool_name.strip().lower()
 
-        if not plan.needs_tool or plan.tool_name not in valid_tools:
+        required_tool_arguments = {
+    "send_reply": ["draft_id"],
+    "update_draft": ["draft_id"],
+    "approve_draft": ["draft_id"],
+    "reject_draft": ["draft_id"],
+    "get_email": ["email_id"],
+    "generate_reply": ["email_id"],
+}
+        if plan.tool_name not in valid_tools:
             plan.needs_tool = False
             plan.tool_name = None
             plan.tool_arguments = {}
-        else:
-            # Ensure proper default parameters for tools
-            if plan.tool_name in {"generate_reply", "rewrite_reply"}:
-                plan.tool_arguments.setdefault("tone", "professional")
-            
-            # Cast numeric IDs stringified by LLMs back to integer types
-            for key in ("email_id", "draft_id"):
-                if key in plan.tool_arguments and isinstance(plan.tool_arguments[key], str):
-                    if plan.tool_arguments[key].isdigit():
-                        plan.tool_arguments[key] = int(plan.tool_arguments[key])
 
+
+        if plan.needs_tool:
+            required = required_tool_arguments.get(plan.tool_name, [])
+
+            if any(plan.tool_arguments.get(arg) is None for arg in required):
+                plan.needs_tool = False
+                plan.tool_name = None
+                plan.tool_arguments = {}
+
+# always normalize afterwards
+        if plan.tool_name in {"generate_reply", "rewrite_reply"}:
+            plan.tool_arguments.setdefault("tone", "professional")
+
+        import re
+
+        for key in ("email_id", "draft_id"):
+            value = plan.tool_arguments.get(key)
+
+            if isinstance(value, str):
+                match = re.search(r"\d+", value)
+
+                if match:
+                    plan.tool_arguments[key] = int(match.group())
+        
         return plan

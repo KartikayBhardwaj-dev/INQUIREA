@@ -11,20 +11,21 @@ class SendReplyTool(BaseTool):
     async def execute(self, **kwargs):
 
         draft_id = kwargs.get("draft_id")
+        user_id = kwargs.get("user_id")
+        db = kwargs.get("db")
 
         if draft_id is None:
             raise ValueError("draft_id is required.")
 
-        db = SessionLocal()
+        if user_id is None:
+            raise ValueError("user_id is required.")
 
-        try:
-            service = GmailActionService(db)
+        if db is None:
+            raise ValueError("Database session missing.")
 
-            result = await service.send_reply(
-                draft_id=draft_id,
-            )
+        service = GmailActionService(db=db)
 
-            return result
-
-        finally:
-            db.close()
+        return await service.send_reply(
+    draft_id=draft_id,
+    user_id=user_id,
+)

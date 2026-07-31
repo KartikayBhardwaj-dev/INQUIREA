@@ -59,7 +59,31 @@ class ChatToolExecutor:
             # Inject DB session into kwargs if not explicitly supplied
             if "db" not in kwargs:
                 kwargs["db"] = self.db
+            required_args = {
+    "send_reply": ["draft_id"],
+    "update_draft": ["draft_id"],
+    "save_draft": [],
+    "approve_draft": ["draft_id"],
+    "reject_draft": ["draft_id"],
+    "get_email": ["email_id"],
+    "generate_reply": ["email_id"],
+}
 
+
+            missing = [
+    arg 
+    for arg in required_args.get(tool_name, [])
+    if kwargs.get(arg) is None
+]
+
+            if missing:
+                return {
+        "success": False,
+        "tool": tool_name,
+        "result": None,
+        "error": f"Missing required arguments: {missing}",
+        "execution_time_ms": 0,
+    }
             result = await tool.execute(**kwargs)
 
             elapsed = round((time.perf_counter() - start) * 1000, 2)
@@ -72,12 +96,16 @@ class ChatToolExecutor:
             }
 
         except Exception as exc:
+            self.db.rollback()
+
             elapsed = round((time.perf_counter() - start) * 1000, 2)
+
             logger.exception("Tool '%s' failed execution.", tool_name)
+
             return {
-                "success": False,
-                "tool": tool_name,
-                "result": None,
-                "error": str(exc),
-                "execution_time_ms": elapsed,
-            }
+        "success": False,
+        "tool": tool_name,
+        "result": None,
+        "error": str(exc),
+        "execution_time_ms": elapsed,
+    }

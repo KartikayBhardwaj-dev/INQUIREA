@@ -47,6 +47,7 @@ class RewriteReplyTool(BaseTool):
                 "tone",
                 "professional",
             ),
+            user_id=kwargs["user_id"]
         )
 
         return {

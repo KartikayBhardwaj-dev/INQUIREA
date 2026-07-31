@@ -24,10 +24,12 @@ class EditDraftTool(BaseTool):
         draft = draft_service.save_draft(
             draft_id=kwargs["draft_id"],
             content=kwargs["content"],
+            user_id=kwargs["user_id"]
         )
 
         approval = approval_service.reset_to_pending(
             draft_id=draft.id,
+            user_id=kwargs["user_id"]
         )
 
         return {

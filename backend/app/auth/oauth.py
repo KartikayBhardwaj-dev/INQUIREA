@@ -14,12 +14,13 @@ oauth.register(
         "https://accounts.google.com/.well-known/openid-configuration"
     ),
     client_kwargs={
-        "scope": (
-            "openid "
-            "email "
-            "profile "
-            "https://www.googleapis.com/auth/gmail.readonly "
-            "https://www.googleapis.com/auth/gmail.send"
-        )
-    }
+    "scope": (
+        "openid "
+        "email "
+        "profile "
+        "https://www.googleapis.com/auth/gmail.readonly "
+        "https://www.googleapis.com/auth/gmail.modify "
+        "https://www.googleapis.com/auth/gmail.send"
+    )
+}
 )

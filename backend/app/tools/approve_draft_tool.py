@@ -23,6 +23,7 @@ class ApproveDraftTool(BaseTool):
 
         approval = tools.approve_draft(
             draft_id=kwargs["draft_id"],
+            user_id=kwargs["user_id"]
         )
 
         return {

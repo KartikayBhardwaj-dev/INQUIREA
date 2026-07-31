@@ -23,6 +23,7 @@ class RejectDraftTool(BaseTool):
 
         approval = tools.reject_draft(
             draft_id=kwargs["draft_id"],
+            user_id=kwargs["user_id"]
         )
 
         return {

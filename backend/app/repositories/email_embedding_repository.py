@@ -433,14 +433,14 @@ class EmailEmbeddingRepository:
             email_id=email_id,
             embedding=vector,
             document=document,
-            metadata_json=metadata,
+            metadata=metadata,
             updated_at=datetime.utcnow(),
         ).on_conflict_do_update(
             index_elements=["email_id"],
             set_={
                 "embedding": excluded.embedding,
                 "document": excluded.document,
-                "metadata_json": excluded.metadata_json,
+                "metadata": excluded.metadata,
                 "updated_at": datetime.utcnow(),
             },
         )
@@ -464,7 +464,7 @@ class EmailEmbeddingRepository:
                     "email_id": item["email_id"],
                     "embedding": list(vector),
                     "document": item["document"],
-                    "metadata_json": item["metadata"],
+                    "metadata": item["metadata"],
                     "updated_at": datetime.utcnow(),
                 }
             )
@@ -479,7 +479,7 @@ class EmailEmbeddingRepository:
             set_={
                 "embedding": excluded.embedding,
                 "document": excluded.document,
-                "metadata_json": excluded.metadata_json,
+                "metadata": excluded.metadata,
                 "updated_at": datetime.utcnow(),
             },
         )

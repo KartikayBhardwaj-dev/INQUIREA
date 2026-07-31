@@ -4,7 +4,7 @@ from backend.app.services.draft_service import DraftService
 from backend.app.tools.base_tool import BaseTool
 from backend.app.tools.draft_tools import DraftTools
 
-
+from backend.app.services.gmail_action_service import GmailActionService
 # class GenerateReplyTool(BaseTool):
 
 #     name = "generate_reply"
@@ -60,14 +60,39 @@ class GenerateReplyTool(BaseTool):
             tone=kwargs.get(
                 "tone",
                 "professional",
+
             ),
+            user_id=kwargs["user_id"]
         )
 
+        gmail_service = GmailActionService(
+
+    db=kwargs["db"]
+
+)
+
+        gmail_result = await gmail_service.save_draft(
+
+    draft_id=draft.id,
+
+    user_id=kwargs["user_id"]
+
+)
+
         return {
-            "draft_id": draft.id,
-            "email_id": draft.email_id,
-            "draft": draft.draft,
-            "version": draft.version,
-            "tone": draft.tone,
-            "is_current": draft.is_current,
-        }
+
+    "draft_id": draft.id,
+
+    "email_id": draft.email_id,
+
+    "draft": draft.draft,
+
+    "version": draft.version,
+
+    "tone": draft.tone,
+
+    "is_current": draft.is_current,
+
+    "gmail_draft_id": gmail_result.get("gmail_draft_id"),
+
+}
