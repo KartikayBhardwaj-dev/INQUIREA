@@ -1,14 +1,126 @@
-.venv/
+# =====================================================
+# Python
+# =====================================================
+
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+
+# Virtual Environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python Packaging
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type Checking
+.mypy_cache/
+.pytype/
+
+# Linting
+.ruff_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# =====================================================
+# FastAPI / Backend
+# =====================================================
 
 .env
+.env.*
 
-.idea/
-.vscode/
+!.env.example
 
-alembic/versions/__pycache__/
+instance/
 
+# SQLite
 *.db
+*.sqlite
+*.sqlite3
 
+# Logs
+*.log
+logs/
+
+# Redis
+dump.rdb
+
+# Alembic cache
+alembic/__pycache__/
+
+# =====================================================
+# Node / Frontend
+# =====================================================
+
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/coverage/
+
+# Environment
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# npm
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# =====================================================
+# IDE
+# =====================================================
+
+.vscode/
+.idea/
+
+*.swp
+*.swo
 .DS_Store
+
+# =====================================================
+# macOS
+# =====================================================
+
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100
+.Trashes
+
+# =====================================================
+# Misc
+# =====================================================
+
+.cache/
+temp/
+tmp/
+
+# =====================================================
+# Secrets
+# =====================================================
+
+*.pem
+*.key
+*.crt
+
+# =====================================================
+# Optional
+# =====================================================
+
+*.bak
+*.orig
