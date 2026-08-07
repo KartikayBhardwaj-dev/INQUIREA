@@ -1,26 +1,53 @@
 'use client'
 
 import { useState } from 'react'
-import { Bot, Check, Copy, FileText, RefreshCw, Send, Sparkles, UserRound } from 'lucide-react'
-import { emails, sendChat } from '@/lib/api'
+import { Bot, Send, Sparkles, UserRound } from 'lucide-react'
+import { sendChat } from '@/lib/api'
 
 const starter = 'I found 3 conversations related to the launch timeline. Alex is waiting on final review, while Jon asked whether the integrations milestone can move forward.'
-const initialDraft = 'Hi Alex,\n\nThanks for sending this through. I reviewed the latest launch plan and everything looks in good shape from my side. Let’s use tomorrow morning to close out the remaining details and confirm owners.\n\nBest,\nKartikay'
 
 export function ChatView() {
   const [message, setMessage] = useState('')
   const [answer, setAnswer] = useState(starter)
-  const [draft, setDraft] = useState(initialDraft)
   const [sending, setSending] = useState(false)
-  const [draftState, setDraftState] = useState<'idle' | 'approved' | 'sent'>('idle')
-  const [copied, setCopied] = useState(false)
-  const [selected, setSelected] = useState(emails[0])
 
-  const submit = async () => { if (!message.trim()) return; const current = message; setMessage(''); setSending(true); try { const result = await sendChat(current); setAnswer(result.answer) } catch { setAnswer('I searched your synced inbox and found a few related conversations. Connect the API in Settings to enable live answers.') } finally { setSending(false) } }
-  const regenerate = () => { setDraft('Hi Alex,\n\nI reviewed the latest launch plan and the remaining items look aligned. Let’s meet tomorrow morning to confirm final owners and close the timeline.\n\nBest,\nKartikay'); setDraftState('idle') }
-  const copyDraft = async () => { await navigator.clipboard?.writeText(draft); setCopied(true); window.setTimeout(() => setCopied(false), 1600) }
+  const submit = async () => {
+    if (!message.trim()) return
+    const current = message
+    setMessage('')
+    setSending(true)
+    try {
+      const result = await sendChat(current)
+      setAnswer(result.answer)
+    } catch {
+      setAnswer('I searched your synced inbox and found a few related conversations. Connect the API in Settings to enable live answers.')
+    } finally {
+      setSending(false)
+    }
+  }
 
-  return <main className="min-w-0 flex-1 px-4 py-5 sm:px-7 lg:px-10 lg:py-8"><div className="mx-auto flex max-w-[1050px] flex-col gap-5"><div><p className="mb-1 text-sm text-[var(--muted)]">AI email assistant</p><h1 className="text-3xl font-semibold tracking-tight">Chat with your inbox</h1><p className="mt-2 text-sm text-[var(--muted)]">Search context, understand threads, and move replies forward.</p></div>
-    <div className="grid gap-5 lg:grid-cols-[1fr_320px]"><section className="flex min-h-[650px] flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-sm"><div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-4 sm:px-6"><div className="flex size-9 items-center justify-center rounded-full bg-[var(--blue-soft)] text-[var(--blue)]"><Bot className="size-5" /></div><div><p className="text-sm font-semibold">Inquirea Assistant</p><p className="text-xs text-[var(--muted)]">Connected to your inbox</p></div><span className="ml-auto size-2 rounded-full bg-[#0f9d58]" /></div><div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6"><div className="flex gap-3"><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--blue-soft)] text-[var(--blue)]"><Bot className="size-4" /></div><div className="max-w-[90%] rounded-2xl rounded-tl-sm bg-[var(--surface-2)] px-4 py-3 text-sm leading-6"><p>{answer}</p><div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--blue)]"><button type="button" onClick={() => setMessage('Show me emails from Sarah this week')} className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 hover:bg-[var(--blue-soft)]">Show related emails</button><button type="button" onClick={() => setMessage('Draft a reply to the latest launch email')} className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 hover:bg-[var(--blue-soft)]">Draft a reply</button></div></div></div>{message && <div className="flex justify-end gap-3"><div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[var(--blue)] px-4 py-3 text-sm leading-6 text-white">{message}</div><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--muted)]"><UserRound className="size-4" /></div></div>}{sending && <div className="flex items-center gap-2 text-sm text-[var(--muted)]"><Sparkles className="size-4 animate-pulse text-[var(--blue)]" /> Searching your inbox...</div>}</div><div className="border-t border-[var(--line)] p-4 sm:p-5"><div className="flex items-end gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-2 focus-within:border-[var(--blue)]"><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void submit() } }} placeholder="Ask anything about your inbox..." rows={2} className="min-h-12 flex-1 resize-none bg-transparent px-2 py-2 text-sm outline-none" /><button type="button" onClick={() => void submit()} disabled={sending || !message.trim()} aria-label="Send message" className="flex size-10 items-center justify-center rounded-lg bg-[var(--blue)] text-white transition hover:opacity-90 disabled:opacity-40"><Send className="size-4" /></button></div><p className="mt-2 text-center text-xs text-[var(--muted)]">Inquirea can make mistakes. Check important information.</p></div></section>
-      <aside className="flex flex-col gap-4"><div className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-sm"><div className="flex items-center justify-between"><h2 className="font-semibold">Relevant emails</h2><span className="text-xs text-[var(--muted)]">3 found</span></div><div className="mt-3 flex flex-col gap-2">{emails.slice(0, 3).map((email) => <button key={email.id} type="button" onClick={() => setSelected(email)} className={`rounded-lg border p-3 text-left transition ${selected.id === email.id ? 'border-[var(--blue)] bg-[var(--blue-soft)]' : 'border-[var(--line)] hover:bg-[var(--surface-2)]'}`}><p className="truncate text-sm font-semibold">{email.subject}</p><p className="mt-1 text-xs text-[var(--muted)]">{email.sender} · {email.time}</p></button>)}</div></div><div className="rounded-xl border border-[var(--line)] bg-[var(--surface)] p-4 shadow-sm"><div className="flex items-center justify-between"><div className="flex items-center gap-2"><FileText className="size-4 text-[var(--blue)]" /><h2 className="font-semibold">Reply draft</h2></div><span className="rounded-full bg-[var(--blue-soft)] px-2 py-1 text-[11px] font-semibold text-[var(--blue)]">AI generated</span></div><p className="mt-3 text-xs text-[var(--muted)]">Re: {selected.subject}</p><textarea value={draft} onChange={(event) => { setDraft(event.target.value); setDraftState('idle') }} rows={9} className="mt-3 w-full resize-none rounded-lg border border-[var(--line)] bg-[var(--surface-2)] p-3 text-sm leading-6 outline-none focus:border-[var(--blue)]" /><div className="mt-3 flex flex-wrap gap-2"><button type="button" onClick={regenerate} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-xs font-semibold hover:bg-[var(--surface-2)]"><RefreshCw className="size-3.5" /> Regenerate</button><button type="button" onClick={() => void copyDraft()} className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--line)] px-3 py-2 text-xs font-semibold hover:bg-[var(--surface-2)]"><Copy className="size-3.5" /> {copied ? 'Copied' : 'Copy'}</button></div><button type="button" onClick={() => setDraftState(draftState === 'approved' ? 'sent' : 'approved')} className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[var(--blue)] px-3 py-2.5 text-sm font-semibold text-white hover:opacity-90">{draftState === 'sent' ? <><Check className="size-4" /> Sent successfully</> : draftState === 'approved' ? <><Check className="size-4" /> Approved — Send reply</> : 'Approve draft'}</button></div></aside></div></div></main>
+  return (
+    <main className="min-w-0 flex-1 px-4 py-5 sm:px-7 lg:px-10 lg:py-8">
+      <div className="mx-auto flex max-w-[1180px] flex-col gap-5">
+        <div>
+          <p className="mb-1 text-sm text-[var(--muted)]">AI email assistant</p>
+          <h1 className="text-3xl font-semibold tracking-tight">AI Assistant</h1>
+          <p className="mt-2 text-sm text-[var(--muted)]">Search context, understand threads, and move replies forward.</p>
+        </div>
+        <section className="flex min-h-[650px] w-full flex-col overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-sm">
+          <div className="flex items-center gap-3 border-b border-[var(--line)] px-4 py-4 sm:px-6">
+            <div className="flex size-9 items-center justify-center rounded-full bg-[var(--blue-soft)] text-[var(--blue)]"><Bot className="size-5" /></div>
+            <div><p className="text-sm font-semibold">AI Assistant</p><p className="text-xs text-[var(--muted)]">Connected to your inbox</p></div>
+            <span className="ml-auto size-2 rounded-full bg-[#0f9d58]" />
+          </div>
+          <div className="flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
+            <div className="flex gap-3"><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--blue-soft)] text-[var(--blue)]"><Bot className="size-4" /></div><div className="max-w-[90%] rounded-2xl rounded-tl-sm bg-[var(--surface-2)] px-4 py-3 text-sm leading-6"><p>{answer}</p><div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--blue)]"><button type="button" onClick={() => setMessage('Show me emails from Sarah this week')} className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 hover:bg-[var(--blue-soft)]">Show related emails</button><button type="button" onClick={() => setMessage('Draft a reply to the latest launch email')} className="rounded-full border border-[var(--line)] bg-[var(--surface)] px-3 py-1.5 hover:bg-[var(--blue-soft)]">Draft a reply</button></div></div></div>
+            {message && <div className="flex justify-end gap-3"><div className="max-w-[80%] rounded-2xl rounded-tr-sm bg-[var(--blue)] px-4 py-3 text-sm leading-6 text-white">{message}</div><div className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--surface-2)] text-[var(--muted)]"><UserRound className="size-4" /></div></div>}
+            {sending && <div className="flex items-center gap-2 text-sm text-[var(--muted)]"><Sparkles className="size-4" /> Thinking through your inbox...</div>}
+          </div>
+          <div className="border-t border-[var(--line)] p-4 sm:p-5"><div className="flex items-end gap-2 rounded-xl border border-[var(--line)] bg-[var(--surface-2)] p-2 focus-within:border-[var(--blue)]"><textarea value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void submit() } }} placeholder="Ask about your emails..." rows={2} className="min-h-14 flex-1 resize-none bg-transparent px-2 py-1 text-sm leading-6 outline-none" /><button type="button" onClick={() => void submit()} disabled={!message.trim() || sending} className="grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--blue)] text-white transition hover:opacity-90 disabled:opacity-40" aria-label="Send message"><Send className="size-4" /></button></div><p className="mt-2 text-center text-[11px] text-[var(--muted)]">AI can make mistakes. Check important information.</p></div>
+        </section>
+      </div>
+    </main>
+  )
 }

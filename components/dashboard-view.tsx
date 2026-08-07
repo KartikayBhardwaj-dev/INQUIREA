@@ -1,8 +1,9 @@
 'use client'
 
+import useSWR from 'swr'
 import { useState } from 'react'
-import { AlertTriangle, ArrowRight, BarChart3, Check, Clock3, Inbox, Mail, MoreHorizontal, Paperclip, Search, Sparkles, Star, Tag, Users } from 'lucide-react'
-import { syncGmail } from '@/lib/api'
+import { AlertTriangle, ArrowRight, Brain, Check, Clock3, Inbox, Mail, MoreHorizontal, Paperclip, Search, Sparkles, Star, Tag, Users } from 'lucide-react'
+import { getEmailIntelligence, syncGmail } from '@/lib/api'
 
 const emails = [
   { id: 1, sender: 'Sarah Chen', email: 'sarah.chen@acme.io', subject: 'Q4 Strategy Proposal', preview: "Hi team, I've attached the Q4 strategy proposal for your review. The key focus areas are...", time: '10:42 AM', label: 'Work', color: '#fbbc04', unread: true, attachment: true },
@@ -18,6 +19,9 @@ export function DashboardView({ onSync }: { onSync: () => void }) {
   const [syncing, setSyncing] = useState(false)
   const [synced, setSynced] = useState(false)
   const [status, setStatus] = useState('Last synced: 5 minutes ago')
+  const { data: intelligence } = useSWR('email-intelligence', getEmailIntelligence, { revalidateOnFocus: false })
+  const intelligenceCount = intelligence?.length ?? 36
+  const intelligenceOverview = intelligence ? 'Processed from your synced inbox' : 'Ready for your next inbox sync'
   const filteredEmails = emails.filter((email) => `${email.sender} ${email.subject} ${email.preview}`.toLowerCase().includes(query.toLowerCase()))
   const toggleSelected = (id: number) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   const toggleAll = () => setSelected(selected.length === filteredEmails.length ? [] : filteredEmails.map((email) => email.id))
@@ -25,7 +29,8 @@ export function DashboardView({ onSync }: { onSync: () => void }) {
 
   return <main className="min-w-0 flex-1 px-4 py-5 sm:px-7 lg:px-10 lg:py-8"><div className="mx-auto flex max-w-[1180px] flex-col gap-5">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-1 text-sm text-[var(--muted)]">Tuesday, December 17, 2024</p><h1 className="text-3xl font-semibold tracking-tight">Good morning, Alex</h1></div><div className="flex items-center gap-2 text-sm text-[var(--muted)]"><span className="size-2 rounded-full bg-[#0f9d58]" />{status}</div></div>
-    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">{[['Total emails','1,284','+12%',Inbox,'blue'],['Unread','42','-8%',Mail,'orange'],['Need reply','18','+5%',Clock3,'red'],['Inbox health','94%','+3%',BarChart3,'green']].map(([label,value,trend,Icon,tone]) => <Stat key={String(label)} label={String(label)} value={String(value)} trend={String(trend)} Icon={Icon as typeof Inbox} tone={String(tone)} />)}</div>
+    <div className="grid gap-3 sm:grid-cols-3">{[['Unread','42','-8%',Mail,'orange'],['Need reply','18','+5%',Clock3,'red'],['Intelligence emails',String(intelligenceCount),'AI processed',Brain,'blue']].map(([label,value,trend,Icon,tone]) => <Stat key={String(label)} label={String(label)} value={String(value)} trend={String(trend)} Icon={Icon as typeof Inbox} tone={String(tone)} />)}</div>
+    <p className="-mt-2 text-xs text-[var(--muted)]">Intelligence emails: {intelligenceOverview}</p>
     <section className="overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--surface)] shadow-sm"><div className="flex flex-col gap-4 border-b border-[var(--line)] px-4 py-4 sm:px-6 sm:py-5 lg:flex-row lg:items-center lg:justify-between"><div><h2 className="text-lg font-semibold">Inbox intelligence</h2><p className="mt-1 text-sm text-[var(--muted)]">AI-powered insights from your recent emails</p></div><button type="button" onClick={handleSync} disabled={syncing} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[var(--blue)] px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60">{syncing ? 'Syncing...' : synced ? <><Check className="size-4" /> Synced</> : <><Sparkles className="size-4" /> Sync Gmail</>}</button></div>
       <div className="grid divide-y border-b border-[var(--line)] sm:grid-cols-3 sm:divide-x sm:divide-y-0"><Insight icon={AlertTriangle} title="3 high-priority emails" copy="Need your attention today" tone="red" /><Insight icon={Clock3} title="7 emails waiting" copy="For more than 3 days" tone="orange" /><Insight icon={Users} title="12 follow-ups due" copy="Based on your conversations" tone="blue" /></div>
       <div className="flex flex-col gap-3 border-b border-[var(--line)] px-4 py-4 sm:flex-row sm:items-center sm:px-6"><button type="button" onClick={toggleAll} aria-label="Select all emails" className={`flex size-8 items-center justify-center rounded-md border ${selected.length === filteredEmails.length ? 'border-[var(--blue)] bg-[var(--blue)] text-white' : 'border-[var(--line)] text-[var(--muted)]'}`}>{selected.length === filteredEmails.length ? <Check className="size-4" /> : <span className="size-3" />}</button><div className="relative flex-1"><Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-[var(--muted)]" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your inbox" className="h-10 w-full rounded-lg border border-[var(--line)] bg-[var(--surface-2)] pl-9 pr-3 text-sm outline-none transition focus:border-[var(--blue)]" /></div><div className="flex items-center gap-2"><button type="button" aria-label="Label selected emails" className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)] hover:bg-[var(--surface-2)]"><Tag className="size-4" /></button><button type="button" aria-label="More inbox actions" className="rounded-lg border border-[var(--line)] p-2 text-[var(--muted)] hover:bg-[var(--surface-2)]"><MoreHorizontal className="size-4" /></button></div></div>

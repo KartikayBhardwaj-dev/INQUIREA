@@ -10,4 +10,6 @@ export const insights: Insight[] = [{title:'You have 8 emails waiting for a repl
 export const weeklyActivity = [42,68,54,82,61,37,24]
 export async function apiFetch<T>(path:string, options?:RequestInit):Promise<T> { const base=process.env.NEXT_PUBLIC_API_URL; if(!base) throw new Error('API unavailable'); const response=await fetch(`${base}${path}`,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${typeof window!=='undefined'?sessionStorage.getItem('inquirea_token')||'':''}`,...options?.headers}}); if(!response.ok) throw new Error('Request failed'); return response.json() }
 export async function sendChat(message:string, conversationId?:string) { return apiFetch<{answer:string;conversation_id:string;retrieved_emails?:unknown[]}>(`/chat${conversationId?`/${conversationId}`:''}`,{method:'POST',body:JSON.stringify({message,conversation_id:conversationId})}) }
+export type IntelligenceEmail = { id: number; email_id: number; summary?: string | null; category?: string | null; priority?: string | null; action_items?: string[] | null }
+export async function getEmailIntelligence() { return apiFetch<IntelligenceEmail[]>('/email-intelligence/') }
 export async function syncGmail() { return apiFetch<{success:boolean;emails_synced:number}>('/gmail/sync?days=7',{method:'POST'}) }
