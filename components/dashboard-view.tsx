@@ -25,7 +25,20 @@ export function DashboardView({ onSync }: { onSync: () => void }) {
   const filteredEmails = emails.filter((email) => `${email.sender} ${email.subject} ${email.preview}`.toLowerCase().includes(query.toLowerCase()))
   const toggleSelected = (id: number) => setSelected((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id])
   const toggleAll = () => setSelected(selected.length === filteredEmails.length ? [] : filteredEmails.map((email) => email.id))
-  const handleSync = async () => { setSyncing(true); await syncGmail(); setSyncing(false); setSynced(true); setStatus('Last synced: just now'); onSync(); window.setTimeout(() => setSynced(false), 2400) }
+  const handleSync = async () => {
+    setSyncing(true)
+    try {
+      const result = await syncGmail(7)
+      setStatus(`Last synced: just now · ${result.emails_synced} emails`)
+      setSynced(true)
+      onSync()
+      window.setTimeout(() => setSynced(false), 2400)
+    } catch {
+      setStatus('Sync unavailable — check your Gmail connection')
+    } finally {
+      setSyncing(false)
+    }
+  }
 
   return <main className="min-w-0 flex-1 px-4 py-5 sm:px-7 lg:px-10 lg:py-8"><div className="mx-auto flex max-w-[1180px] flex-col gap-5">
     <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end"><div><p className="mb-1 text-sm text-[var(--muted)]">Tuesday, December 17, 2024</p><h1 className="text-3xl font-semibold tracking-tight">Good morning, Alex</h1></div><div className="flex items-center gap-2 text-sm text-[var(--muted)]"><span className="size-2 rounded-full bg-[#0f9d58]" />{status}</div></div>

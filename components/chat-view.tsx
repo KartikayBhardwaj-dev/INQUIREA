@@ -9,6 +9,7 @@ const starter = 'I found 3 conversations related to the launch timeline. Alex is
 export function ChatView() {
   const [message, setMessage] = useState('')
   const [answer, setAnswer] = useState(starter)
+  const [conversationId, setConversationId] = useState<string>()
   const [sending, setSending] = useState(false)
 
   const submit = async () => {
@@ -17,7 +18,8 @@ export function ChatView() {
     setMessage('')
     setSending(true)
     try {
-      const result = await sendChat(current)
+      const result = await sendChat(current, conversationId)
+      setConversationId(result.conversation_id)
       setAnswer(result.answer)
     } catch {
       setAnswer('I searched your synced inbox and found a few related conversations. Connect the API in Settings to enable live answers.')
