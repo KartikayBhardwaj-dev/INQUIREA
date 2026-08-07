@@ -1,9 +1,9 @@
 @import 'tailwindcss';
 
-:root { --background:#101112; --foreground:#f4f1ea; --surface:#17191b; --surface-2:#1d2022; --line:#2b2f31; --muted:#8e9693; --mint:#9de3c2; --mint-strong:#60c99b; --danger:#ed9a8b; }
+:root { --background:#f6f8fb; --foreground:#202124; --surface:#ffffff; --surface-2:#f1f3f4; --line:#dadce0; --muted:#5f6368; --blue:#0b57d0; --blue-soft:#e8f0fe; --danger:#b3261e; }
 * { box-sizing:border-box; }
 html { background:var(--background); }
 body { margin:0; background:var(--background); color:var(--foreground); font-family:Arial, Helvetica, sans-serif; }
 button, input, textarea { font:inherit; }
 button { cursor:pointer; }
-::selection { background:var(--mint); color:#102019; }
+::selection { background:#c2dbff; color:#174ea6; }
