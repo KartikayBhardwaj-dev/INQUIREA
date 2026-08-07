@@ -1,0 +1,13 @@
+export type Email = { id:number; sender:string; initials:string; subject:string; preview:string; time:string; priority:'High'|'Medium'|'Low'; label:string; labelTone:'mint'|'amber'|'blue' }
+export type Insight = { title:string; detail:string; tone:'mint'|'amber'|'blue' }
+export const emails: Email[] = [
+ {id:1,sender:'Alex Morgan',initials:'AM',subject:'Q4 launch plan — final review',preview:'The latest version is ready for your feedback before tomorrow morning.',time:'9:42 AM',priority:'High',label:'Needs reply',labelTone:'mint'},
+ {id:2,sender:'Maya Patel',initials:'MP',subject:'Re: Design system handoff',preview:'I added the component notes and linked the updated Figma file.',time:'8:16 AM',priority:'Medium',label:'Design',labelTone:'blue'},
+ {id:3,sender:'Northstar Labs',initials:'NL',subject:'Your September invoice is ready',preview:'Your monthly invoice and usage breakdown are now available.',time:'Yesterday',priority:'Low',label:'Finance',labelTone:'amber'},
+ {id:4,sender:'Jon Bell',initials:'JB',subject:'Quick question about the roadmap',preview:'Do we still have room to bring the integrations milestone forward?',time:'Yesterday',priority:'High',label:'Needs reply',labelTone:'mint'},
+]
+export const insights: Insight[] = [{title:'You have 8 emails waiting for a reply',detail:'Most are from this week and can be handled in under 20 minutes.',tone:'mint'},{title:'Three conversations mention launch timing',detail:'Alex, Jon, and the Northstar team all reference the October milestone.',tone:'amber'},{title:'Your inbox is trending quieter',detail:'You received 18% fewer emails than the previous seven-day period.',tone:'blue'}]
+export const weeklyActivity = [42,68,54,82,61,37,24]
+export async function apiFetch<T>(path:string, options?:RequestInit):Promise<T> { const base=process.env.NEXT_PUBLIC_API_URL; if(!base) throw new Error('API unavailable'); const response=await fetch(`${base}${path}`,{...options,headers:{'Content-Type':'application/json',Authorization:`Bearer ${typeof window!=='undefined'?sessionStorage.getItem('inquirea_token')||'':''}`,...options?.headers}}); if(!response.ok) throw new Error('Request failed'); return response.json() }
+export async function sendChat(message:string, conversationId?:string) { return apiFetch<{answer:string;conversation_id:string;retrieved_emails?:unknown[]}>(`/chat${conversationId?`/${conversationId}`:''}`,{method:'POST',body:JSON.stringify({message,conversation_id:conversationId})}) }
+export async function syncGmail() { return apiFetch<{success:boolean;emails_synced:number}>('/gmail/sync?days=7',{method:'POST'}) }
