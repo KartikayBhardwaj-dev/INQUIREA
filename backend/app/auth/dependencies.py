@@ -1,36 +1,51 @@
 import jwt
 
-from fastapi import Depends
+from fastapi import Cookie
 from fastapi import HTTPException
-from fastapi.security import HTTPAuthorizationCredentials
-from fastapi.security import HTTPBearer
 
 from backend.app.core.config import get_settings
 
-settings = get_settings()
 
-security = HTTPBearer()
+settings = get_settings()
 
 
 def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(
-        security
+    access_token: str | None = Cookie(
+        default=None
     )
 ):
-    token = credentials.credentials
+    if not access_token:
+        raise HTTPException(
+            status_code=401,
+            detail="Not authenticated"
+        )
 
     try:
         payload = jwt.decode(
-            token,
+            access_token,
             settings.SECRET_KEY,
             algorithms=["HS256"]
         )
 
+        user_id = payload.get("sub")
+
+        if not user_id:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid token"
+            )
+
         return {
-            "user_id": int(payload["sub"])
+            "user_id": int(user_id)
         }
 
-    except Exception:
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=401,
+            detail="Token expired"
+        )
+
+    except jwt.InvalidTokenError:
         raise HTTPException(
             status_code=401,
             detail="Invalid token"
