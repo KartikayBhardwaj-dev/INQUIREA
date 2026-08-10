@@ -118,62 +118,73 @@ class EmailToolService:
     # ---------------------------------------------------------
 
     def _serialize_email(
-        self,
-        email,
-        intelligence,
-    ) -> dict:
+    self,
+    email,
+    intelligence,
+) -> dict:
 
         extracted = {}
 
         if (
-            intelligence
-            and intelligence.extracted_data
-        ):
+        intelligence
+        and intelligence.extracted_data
+    ):
             extracted = intelligence.extracted_data
 
         entities = extracted.get(
-            "extracted_entities",
-            extracted.get(
-                "entities",
-                {},
-            ),
-        )
+        "extracted_entities",
+        extracted.get(
+            "entities",
+            {},
+        ),
+    )
 
         return {
-            "email_id": email.id,
-            "subject": email.subject,
-            "sender": email.sender,
-            "recipient": email.recipient,
-            "received_at": email.received_at,
-            "category": (
-                intelligence.category
-                if intelligence
-                else None
-            ),
-            "priority": (
-                intelligence.priority
-                if intelligence
-                else None
-            ),
-            "summary": (
-                intelligence.summary
-                if intelligence
-                else None
-            ),
-            "requires_reply": extracted.get(
-                "requires_reply",
-                False,
-            ),
-            "entities": entities,
-            "action_items": (
-                entities.get(
-                    "action_items",
-                    [],
-                )
-                if isinstance(
-                    entities,
-                    dict,
-                )
-                else []
-            ),
-        }
+        # Local database ID
+        "email_id": email.id,
+
+        # Actual Gmail message ID
+        "gmail_message_id": email.gmail_message_id,
+
+        "subject": email.subject,
+        "sender": email.sender,
+        "recipient": email.recipient,
+        "received_at": email.received_at,
+
+        "category": (
+            intelligence.category
+            if intelligence
+            else None
+        ),
+
+        "priority": (
+            intelligence.priority
+            if intelligence
+            else None
+        ),
+
+        "summary": (
+            intelligence.summary
+            if intelligence
+            else None
+        ),
+
+        "requires_reply": extracted.get(
+            "requires_reply",
+            False,
+        ),
+
+        "entities": entities,
+
+        "action_items": (
+            entities.get(
+                "action_items",
+                [],
+            )
+            if isinstance(
+                entities,
+                dict,
+            )
+            else []
+        ),
+    }

@@ -52,20 +52,40 @@ class ConversationHistory(BaseModel):
 
 class RetrievedEmail(BaseModel):
     """
-    Email citation returned by the AI.
+    Email metadata returned by the AI retrieval pipeline.
+
+    Important:
+    - email_id = local database email ID
+    - gmail_message_id = actual Gmail message ID
     """
 
     email_id: int
 
+    gmail_message_id: str | None = None
+
     subject: str
 
     sender: str
+
+    recipient: str | None = None
 
     category: str | None = None
 
     priority: str | None = None
 
     received_at: datetime | None = None
+
+    summary: str | None = None
+
+    requires_reply: bool = False
+
+    entities: dict[str, Any] = Field(
+        default_factory=dict
+    )
+
+    action_items: list[Any] = Field(
+        default_factory=list
+    )
 
 
 class ChatResponse(BaseModel):

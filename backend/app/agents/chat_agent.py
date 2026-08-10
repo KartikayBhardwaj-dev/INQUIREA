@@ -170,6 +170,7 @@ class ChatAgent:
                     "email_id": email.id,
                     "subject": email.subject,
                     "sender": email.sender,
+                    "gmail_message_id": email.gmail_message_id,
                     "recipient": email.recipient,
                     "received_at": email.received_at,
                     "category": intelligence.category if intelligence else None,
