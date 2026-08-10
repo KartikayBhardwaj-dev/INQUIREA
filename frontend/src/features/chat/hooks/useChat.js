@@ -51,23 +51,21 @@ function normalizeEmail(email) {
   }
 
   return {
-    // Local database email ID
     id:
       email.id ??
       email.email_id ??
       email.emailId,
 
-    // Keep the explicit local DB ID too
     email_id:
       email.email_id ??
       email.id ??
       email.emailId,
 
-    // IMPORTANT:
-    // Actual Gmail message ID used by Gmail API
     gmail_message_id:
       email.gmail_message_id ??
       email.gmailMessageId ??
+      email.message_id ??
+      email.messageId ??
       null,
 
     subject:
@@ -120,22 +118,9 @@ function normalizeEmail(email) {
       email.content ??
       null,
 
-    labels:
-      email.labels ??
-      email.tags ??
-      [],
-
     tags:
       email.tags ??
       email.labels ??
-      [],
-
-    entities:
-      email.entities ??
-      {},
-
-    action_items:
-      email.action_items ??
       [],
   };
 }

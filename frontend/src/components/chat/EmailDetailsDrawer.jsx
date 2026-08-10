@@ -22,9 +22,7 @@ function formatDate(value) {
         dateStyle: "medium",
         timeStyle: "short",
       }
-    ).format(
-      new Date(value)
-    );
+    ).format(new Date(value));
   } catch {
     return "Unknown";
   }
@@ -55,79 +53,19 @@ export default function EmailDetailsDrawer({
   useEffect(() => {
     let cancelled = false;
 
-    console.log(
-      "🔵 EmailDetailsDrawer useEffect triggered"
-    );
-
-    console.log(
-      "🔵 Email received by drawer:",
-      email
-    );
-
 
     async function load() {
-      console.log(
-        "🔵 load() started"
-      );
-
-
       if (!email) {
-        console.error(
-          "🔴 No email received by EmailDetailsDrawer"
-        );
-
         return;
       }
-
-
-      console.log(
-        "🟢 Email received:",
-        email
-      );
-
-      console.log(
-        "🟢 Local email_id:",
-        email.email_id
-      );
-
-      console.log(
-        "🟢 Gmail message ID:",
-        email.gmail_message_id
-      );
-
 
       setDetails(email);
       setError(null);
 
-
-      /*
-       * IMPORTANT:
-       *
-       * email.email_id
-       * = LOCAL database ID
-       *
-       * email.gmail_message_id
-       * = ACTUAL Gmail message ID
-       *
-       * Gmail API requires gmail_message_id.
-       */
-
       const gmailMessageId =
         email.gmail_message_id;
 
-
-      console.log(
-        "🟡 Gmail message ID extracted:",
-        gmailMessageId
-      );
-
-
       if (!gmailMessageId) {
-        console.error(
-          "🔴 Gmail message ID is missing!",
-          email
-        );
-
         setError(
           "This email does not have a Gmail message ID."
         );
@@ -135,28 +73,13 @@ export default function EmailDetailsDrawer({
         return;
       }
 
-
       setIsLoading(true);
 
-
       try {
-        console.log(
-          "🚀 ABOUT TO CALL getEmailDetails():",
-          gmailMessageId
-        );
-
-
         const data =
           await getEmailDetails(
             gmailMessageId
           );
-
-
-        console.log(
-          "✅ getEmailDetails() RESPONSE:",
-          data
-        );
-
 
         if (!cancelled) {
           setDetails(
@@ -164,18 +87,7 @@ export default function EmailDetailsDrawer({
             data
           );
         }
-      } catch (err) {
-        console.error(
-          "❌ getEmailDetails() FAILED:",
-          err
-        );
-
-        console.error(
-          "❌ Gmail ID used:",
-          gmailMessageId
-        );
-
-
+      } catch {
         if (!cancelled) {
           setError(
             "Unable to load the complete email."
@@ -194,10 +106,6 @@ export default function EmailDetailsDrawer({
 
     return () => {
       cancelled = true;
-
-      console.log(
-        "🟣 EmailDetailsDrawer cleanup"
-      );
     };
   }, [email]);
 
@@ -220,7 +128,6 @@ export default function EmailDetailsDrawer({
       {/* DRAWER */}
 
       <aside className="fixed inset-y-0 right-0 z-50 flex w-full max-w-xl flex-col border-l border-white/10 bg-neutral-950 text-white shadow-2xl">
-
 
         {/* HEADER */}
 
@@ -251,7 +158,6 @@ export default function EmailDetailsDrawer({
         {/* CONTENT */}
 
         <div className="min-h-0 flex-1 overflow-y-auto p-6">
-
 
           {/* LOADING */}
 
@@ -284,9 +190,7 @@ export default function EmailDetailsDrawer({
 
             {details?.category && (
               <span className="rounded-full bg-white/10 px-3 py-1.5 text-[10px] font-medium text-white/60">
-                {String(
-                  details.category
-                ).replaceAll(
+                {String(details.category).replaceAll(
                   "_",
                   " "
                 )}
@@ -364,13 +268,11 @@ export default function EmailDetailsDrawer({
 
 
             <div className="mt-3 whitespace-pre-wrap rounded-2xl bg-white/[0.04] p-5 text-sm leading-7 text-white/70">
-
               {details?.body ??
                 details?.content ??
                 details?.text ??
                 details?.snippet ??
                 "No email body available."}
-
             </div>
 
           </section>

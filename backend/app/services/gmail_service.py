@@ -1,8 +1,9 @@
 from typing import Any
-
-import httpx
 import base64
 from email.mime.text import MIMEText
+
+import httpx
+
 
 class GmailService:
 
@@ -16,9 +17,7 @@ class GmailService:
         access_token: str,
     ):
         self.headers = {
-            "Authorization": (
-                f"Bearer {access_token}"
-            )
+            "Authorization": f"Bearer {access_token}",
         }
 
     async def list_emails(
@@ -28,14 +27,13 @@ class GmailService:
     ) -> dict[str, Any]:
 
         params = {
-            "maxResults": max_results
+            "maxResults": max_results,
         }
 
         if query:
             params["q"] = query
 
         async with httpx.AsyncClient() as client:
-
             response = await client.get(
                 f"{self.BASE_URL}/messages",
                 headers=self.headers,
@@ -52,13 +50,12 @@ class GmailService:
     ) -> dict[str, Any]:
 
         async with httpx.AsyncClient() as client:
-
             response = await client.get(
-                (
-                    f"{self.BASE_URL}/messages/"
-                    f"{message_id}"
-                ),
+                f"{self.BASE_URL}/messages/{message_id}",
                 headers=self.headers,
+                params={
+                    "format": "full",
+                },
             )
 
         response.raise_for_status()
@@ -71,12 +68,8 @@ class GmailService:
     ) -> dict[str, Any]:
 
         async with httpx.AsyncClient() as client:
-
             response = await client.get(
-                (
-                    f"{self.BASE_URL}/threads/"
-                    f"{thread_id}"
-                ),
+                f"{self.BASE_URL}/threads/{thread_id}",
                 headers=self.headers,
             )
 
@@ -91,7 +84,6 @@ class GmailService:
     ) -> dict[str, Any]:
 
         async with httpx.AsyncClient() as client:
-
             response = await client.get(
                 (
                     f"{self.BASE_URL}/messages/"
@@ -104,7 +96,7 @@ class GmailService:
         response.raise_for_status()
 
         return response.json()
-    
+
     async def create_draft(
         self,
         to: str,
@@ -132,7 +124,6 @@ class GmailService:
             payload["message"]["threadId"] = thread_id
 
         async with httpx.AsyncClient() as client:
-
             response = await client.post(
                 f"{self.BASE_URL}/drafts",
                 headers=self.headers,
@@ -142,7 +133,7 @@ class GmailService:
         response.raise_for_status()
 
         return response.json()
-    
+
     async def update_draft(
         self,
         draft_id: str,
@@ -172,7 +163,6 @@ class GmailService:
             payload["message"]["threadId"] = thread_id
 
         async with httpx.AsyncClient() as client:
-
             response = await client.put(
                 f"{self.BASE_URL}/drafts/{draft_id}",
                 headers=self.headers,
@@ -182,7 +172,7 @@ class GmailService:
         response.raise_for_status()
 
         return response.json()
-    
+
     async def send_draft(
         self,
         draft_id: str,
@@ -193,7 +183,6 @@ class GmailService:
         }
 
         async with httpx.AsyncClient() as client:
-
             response = await client.post(
                 f"{self.BASE_URL}/drafts/send",
                 headers=self.headers,
@@ -203,3 +192,94 @@ class GmailService:
         response.raise_for_status()
 
         return response.json()
+
+    @staticmethod
+    def _decode_body(
+        data: str | None,
+    ) -> str:
+
+        if not data:
+            return ""
+
+        try:
+            decoded = base64.urlsafe_b64decode(
+                data + "=" * (
+                    -len(data) % 4
+                )
+            )
+
+            return decoded.decode(
+                "utf-8",
+                errors="replace",
+            )
+
+        except Exception:
+            return ""
+
+    @classmethod
+    def _extract_body(
+        cls,
+        payload: dict[str, Any] | None,
+    ) -> str:
+
+        if not payload:
+            return ""
+
+        body = payload.get("body") or {}
+
+        data = body.get("data")
+
+        if data:
+            return cls._decode_body(data)
+
+        parts = payload.get("parts") or []
+
+        plain_text = ""
+        html_text = ""
+
+        for part in parts:
+            mime_type = part.get(
+                "mimeType",
+                "",
+            )
+
+            part_body = part.get(
+                "body"
+            ) or {}
+
+            part_data = part_body.get(
+                "data"
+            )
+
+            if part_data:
+                decoded = cls._decode_body(
+                    part_data
+                )
+
+                if mime_type == "text/plain":
+                    plain_text += decoded
+
+                elif mime_type == "text/html":
+                    html_text += decoded
+
+            nested_parts = part.get(
+                "parts"
+            )
+
+            if nested_parts:
+                nested_body = cls._extract_body(
+                    {
+                        "parts": nested_parts
+                    }
+                )
+
+                if nested_body:
+                    plain_text += nested_body
+
+        if plain_text.strip():
+            return plain_text.strip()
+
+        if html_text.strip():
+            return html_text.strip()
+
+        return ""

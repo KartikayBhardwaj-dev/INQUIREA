@@ -54,77 +54,21 @@ export async function getChatHistory(
 }
 
 
-/* =========================================================
-   GET COMPLETE GMAIL EMAIL
-========================================================= */
-
 export async function getEmailDetails(
   gmailMessageId
 ) {
-  console.log(
-    "📡 getEmailDetails SERVICE CALLED:",
-    gmailMessageId
-  );
-
-
   if (!gmailMessageId) {
-    console.error(
-      "🔴 getEmailDetails called WITHOUT Gmail message ID"
-    );
-
     throw new Error(
       "Missing Gmail message ID"
     );
   }
 
-
-  const url =
-    `/gmail/email/${encodeURIComponent(
-      gmailMessageId
-    )}`;
-
-
-  console.log(
-    "📡 GETTING URL:",
-    url
-  );
-
-
-  try {
-    const response =
-      await api.get(url);
-
-
-    console.log(
-      "✅ Gmail API response:",
-      response.data
+  const response =
+    await api.get(
+      `/gmail/email/${encodeURIComponent(
+        gmailMessageId
+      )}`
     );
 
-
-    return response.data;
-
-  } catch (error) {
-
-    console.error(
-      "❌ Gmail API request failed:",
-      error
-    );
-
-    console.error(
-      "❌ Gmail API request URL:",
-      url
-    );
-
-    console.error(
-      "❌ Gmail API status:",
-      error?.response?.status
-    );
-
-    console.error(
-      "❌ Gmail API response:",
-      error?.response?.data
-    );
-
-    throw error;
-  }
+  return response.data;
 }
