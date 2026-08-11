@@ -4,7 +4,8 @@ import logging
 
 from sqlalchemy.orm import Session
 
-from backend.app.models.approval import Approval, ApprovalStatus
+from backend.app.models.approval import Approval
+from backend.app.models.approval import ApprovalStatus
 from backend.app.models.draft_reply import DraftReply
 
 logger = logging.getLogger(__name__)
@@ -12,30 +13,25 @@ logger = logging.getLogger(__name__)
 
 class ApprovalService:
     """
-    Approval lifecycle service.
-
-    Valid state transitions:
+    Approval lifecycle:
 
         PENDING
-           ├── APPROVE → APPROVED
-           └── REJECT  → REJECTED
+          ├── APPROVE → APPROVED
+          └── REJECT  → REJECTED
 
         APPROVED
-           └── EDIT/REWRITE/REGENERATE → PENDING
+          └── EDIT → PENDING
 
         REJECTED
-           └── EDIT/REWRITE/REGENERATE → PENDING
-
-    Editing a draft is handled by DraftService, which calls
-    reset_to_pending() when necessary.
+          └── EDIT / REGENERATE → PENDING
     """
 
     def __init__(self, db: Session):
         self.db = db
 
-    # ---------------------------------------------------------
+    # =========================================================
     # LOAD
-    # ---------------------------------------------------------
+    # =========================================================
 
     def load_approval(
         self,
@@ -43,8 +39,7 @@ class ApprovalService:
     ) -> Approval | None:
 
         return (
-            self.db
-            .query(Approval)
+            self.db.query(Approval)
             .filter(
                 Approval.draft_reply_id == draft_id
             )
@@ -54,32 +49,31 @@ class ApprovalService:
     def load_draft(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> DraftReply | None:
 
-        query = (
-            self.db
-            .query(DraftReply)
-            .filter(
-                DraftReply.id == draft_id
+        if user_id is None:
+            raise ValueError(
+                "Authenticated user_id is required."
             )
+
+        return (
+            self.db.query(DraftReply)
+            .filter(
+                DraftReply.id == draft_id,
+                DraftReply.user_id == user_id,
+            )
+            .first()
         )
 
-        if user_id is not None:
-            query = query.filter(
-                DraftReply.user_id == user_id
-            )
-
-        return query.first()
-
-    # ---------------------------------------------------------
+    # =========================================================
     # APPROVE
-    # ---------------------------------------------------------
+    # =========================================================
 
     def approve_draft(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> Approval:
 
         draft = self.load_draft(
@@ -89,19 +83,16 @@ class ApprovalService:
 
         if draft is None:
             raise ValueError(
-                f"Draft with ID {draft_id} not found."
+                f"Draft {draft_id} not found."
             )
 
         approval = self.load_approval(draft_id)
 
-        # A draft without an approval record is treated
-        # as pending.
         if approval is None:
             approval = Approval(
                 draft_reply_id=draft_id,
                 status=ApprovalStatus.PENDING.value,
             )
-
             self.db.add(approval)
             self.db.flush()
 
@@ -116,20 +107,21 @@ class ApprovalService:
         self.db.refresh(approval)
 
         logger.info(
-            "Draft %s approved.",
+            "Draft %s approved by User %s.",
             draft_id,
+            user_id,
         )
 
         return approval
 
-    # ---------------------------------------------------------
+    # =========================================================
     # REJECT
-    # ---------------------------------------------------------
+    # =========================================================
 
     def reject_draft(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> Approval:
 
         draft = self.load_draft(
@@ -139,7 +131,7 @@ class ApprovalService:
 
         if draft is None:
             raise ValueError(
-                f"Draft with ID {draft_id} not found."
+                f"Draft {draft_id} not found."
             )
 
         approval = self.load_approval(draft_id)
@@ -149,7 +141,6 @@ class ApprovalService:
                 draft_reply_id=draft_id,
                 status=ApprovalStatus.PENDING.value,
             )
-
             self.db.add(approval)
             self.db.flush()
 
@@ -164,20 +155,21 @@ class ApprovalService:
         self.db.refresh(approval)
 
         logger.info(
-            "Draft %s rejected.",
+            "Draft %s rejected by User %s.",
             draft_id,
+            user_id,
         )
 
         return approval
 
-    # ---------------------------------------------------------
-    # GET STATUS
-    # ---------------------------------------------------------
+    # =========================================================
+    # STATUS
+    # =========================================================
 
     def get_status(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> str:
 
         draft = self.load_draft(
@@ -187,7 +179,7 @@ class ApprovalService:
 
         if draft is None:
             raise ValueError(
-                f"Draft with ID {draft_id} not found."
+                f"Draft {draft_id} not found."
             )
 
         approval = self.load_approval(draft_id)
@@ -197,9 +189,9 @@ class ApprovalService:
 
         return approval.status
 
-    # ---------------------------------------------------------
-    # VALIDATE STATE TRANSITION
-    # ---------------------------------------------------------
+    # =========================================================
+    # TRANSITION VALIDATION
+    # =========================================================
 
     def _validate_transition(
         self,
@@ -219,79 +211,45 @@ class ApprovalService:
                 f"'{current_status}'."
             )
 
-        # -----------------------------------------------------
-        # Same state
-        # -----------------------------------------------------
-
-        if current_status == new_status:
-
-            if new_status == ApprovalStatus.APPROVED.value:
-                raise ValueError(
-                    "Draft is already approved."
-                )
-
-            if new_status == ApprovalStatus.REJECTED.value:
-                raise ValueError(
-                    "Draft is already rejected."
-                )
-
+        if new_status not in valid_statuses:
             raise ValueError(
-                f"Draft is already {current_status}."
+                f"Invalid target approval status: "
+                f"'{new_status}'."
             )
 
         # -----------------------------------------------------
         # PENDING → APPROVED
+        # -----------------------------------------------------
+
+        if (
+            current_status == ApprovalStatus.PENDING.value
+            and new_status == ApprovalStatus.APPROVED.value
+        ):
+            return
+
+        # -----------------------------------------------------
         # PENDING → REJECTED
         # -----------------------------------------------------
 
-        if current_status == ApprovalStatus.PENDING.value:
-
-            if new_status in {
-                ApprovalStatus.APPROVED.value,
-                ApprovalStatus.REJECTED.value,
-            }:
-                return
-
-        # -----------------------------------------------------
-        # APPROVED cannot directly become REJECTED.
-        # It must first be edited/re-written, which creates
-        # a pending draft/version.
-        # -----------------------------------------------------
-
-        if current_status == ApprovalStatus.APPROVED.value:
-
-            raise ValueError(
-                f"Cannot transition draft from "
-                f"'{current_status}' to '{new_status}'. "
-                f"Edit or rewrite the draft first."
-            )
-
-        # -----------------------------------------------------
-        # REJECTED cannot directly become APPROVED.
-        # It must first be edited/re-written.
-        # -----------------------------------------------------
-
-        if current_status == ApprovalStatus.REJECTED.value:
-
-            raise ValueError(
-                f"Cannot transition draft from "
-                f"'{current_status}' to '{new_status}'. "
-                f"Edit or rewrite the draft first."
-            )
+        if (
+            current_status == ApprovalStatus.PENDING.value
+            and new_status == ApprovalStatus.REJECTED.value
+        ):
+            return
 
         raise ValueError(
             f"Invalid approval transition: "
             f"{current_status} → {new_status}."
         )
 
-    # ---------------------------------------------------------
+    # =========================================================
     # RESET TO PENDING
-    # ---------------------------------------------------------
+    # =========================================================
 
     def reset_to_pending(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
         commit: bool = True,
     ) -> Approval:
 
@@ -302,43 +260,34 @@ class ApprovalService:
 
         if draft is None:
             raise ValueError(
-                f"Draft with ID {draft_id} not found."
+                f"Draft {draft_id} not found."
             )
 
         approval = self.load_approval(draft_id)
 
-        # -----------------------------------------------------
-        # Create approval if it doesn't exist.
-        # -----------------------------------------------------
-
         if approval is None:
-
             approval = Approval(
                 draft_reply_id=draft_id,
                 status=ApprovalStatus.PENDING.value,
             )
-
             self.db.add(approval)
-
         else:
-
-            # Editing a draft is allowed to reset:
-            #
-            # APPROVED → PENDING
-            # REJECTED → PENDING
-            #
-            # It is also harmless for PENDING → PENDING.
+            # -------------------------------------------------
+            # EDIT / REWRITE / REGENERATE
+            # always returns approval to pending.
+            # -------------------------------------------------
             approval.status = ApprovalStatus.PENDING.value
+
+        self.db.flush()
 
         if commit:
             self.db.commit()
             self.db.refresh(approval)
-        else:
-            self.db.flush()
 
         logger.info(
-            "Draft %s reset to pending.",
+            "Draft %s reset to PENDING for User %s.",
             draft_id,
+            user_id,
         )
 
         return approval

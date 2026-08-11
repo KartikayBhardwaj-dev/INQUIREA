@@ -16,6 +16,10 @@ class DraftReply(Base):
         autoincrement=True,
     )
 
+    # ---------------------------------------------------------
+    # Email
+    # ---------------------------------------------------------
+
     email_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("emails.id"),
@@ -23,11 +27,22 @@ class DraftReply(Base):
         nullable=False,
     )
 
-    user_id: Mapped[int | None] = mapped_column(
+    # ---------------------------------------------------------
+    # Ownership
+    # ---------------------------------------------------------
+
+    user_id: Mapped[int] = mapped_column(
         Integer,
-        nullable=True,
         index=True,
+        nullable=False,
     )
+
+    # Every draft MUST belong to a user.
+    # This prevents accidental cross-user draft creation.
+
+    # ---------------------------------------------------------
+    # Draft
+    # ---------------------------------------------------------
 
     draft: Mapped[str] = mapped_column(
         Text,

@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.app.agents.reply_agent import ReplyAgent
-from backend.app.models.approval import Approval, ApprovalStatus
+from backend.app.models.approval import Approval
 from backend.app.models.draft_reply import DraftReply
 from backend.app.models.email import Email
 from backend.app.repositories.draft_repository import DraftRepository
@@ -19,28 +19,13 @@ class DraftService:
     """
     Draft management service.
 
-    Responsibilities
-    ----------------
+    Responsibilities:
     - Generate drafts
     - Rewrite drafts
     - Regenerate drafts
     - Persist draft versions
     - Manage approval lifecycle
-    - Load drafts
-
-    Approval lifecycle:
-
-        New draft
-            ↓
-        PENDING
-            ↓
-        APPROVED / REJECTED
-
-        Any edit/rewrite/regeneration
-            ↓
-        New version
-            ↓
-        PENDING
+    - Enforce user ownership
     """
 
     def __init__(self, db: Session):
@@ -50,29 +35,37 @@ class DraftService:
         self.approval_service = ApprovalService(db)
 
     # =========================================================
+    # OWNERSHIP
+    # =========================================================
+
+    def _require_user(self, user_id: int | None) -> int:
+        if user_id is None:
+            raise ValueError(
+                "Authenticated user_id is required."
+            )
+
+        return user_id
+
+    # =========================================================
     # EMAIL
     # =========================================================
 
     def _load_email(
         self,
         email_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> Email | None:
 
-        query = (
-            self.db
-            .query(Email)
+        user_id = self._require_user(user_id)
+
+        return (
+            self.db.query(Email)
             .filter(
-                Email.id == email_id
+                Email.id == email_id,
+                Email.user_id == user_id,
             )
+            .first()
         )
-
-        if user_id is not None:
-            query = query.filter(
-                Email.user_id == user_id
-            )
-
-        return query.first()
 
     # =========================================================
     # DRAFT
@@ -81,8 +74,10 @@ class DraftService:
     def load_draft(
         self,
         draft_id: int,
-        user_id: int | None = None,
+        user_id: int,
     ) -> DraftReply | None:
+
+        user_id = self._require_user(user_id)
 
         return self.repository.get_by_id(
             draft_id=draft_id,
@@ -90,7 +85,7 @@ class DraftService:
         )
 
     # =========================================================
-    # GENERATE DRAFT
+    # GENERATE
     # =========================================================
 
     async def generate_draft(
@@ -100,14 +95,22 @@ class DraftService:
         user_id: int | None = None,
     ) -> DraftReply:
 
+        user_id = self._require_user(user_id)
+
+        # -----------------------------------------------------
+        # IMPORTANT:
+        # Email MUST belong to authenticated user.
+        # -----------------------------------------------------
+
         email = self._load_email(
-            email_id,
+            email_id=email_id,
             user_id=user_id,
         )
 
         if email is None:
             raise ValueError(
-                f"Email with ID {email_id} not found."
+                f"Email with ID {email_id} not found "
+                f"for user {user_id}."
             )
 
         # -----------------------------------------------------
@@ -137,10 +140,12 @@ class DraftService:
         # -----------------------------------------------------
         # Repository handles:
         #
-        # - latest version lookup
-        # - version + 1
-        # - old is_current = False
-        # - new is_current = True
+        # version 1
+        # version N + 1
+        # old current = False
+        # new current = True
+        #
+        # AND stores user_id.
         # -----------------------------------------------------
 
         draft = self.repository.create_draft(
@@ -151,7 +156,7 @@ class DraftService:
         )
 
         # -----------------------------------------------------
-        # Every newly generated version starts PENDING.
+        # Every new version gets PENDING approval.
         # -----------------------------------------------------
 
         approval = self.approval_service.reset_to_pending(
@@ -160,19 +165,17 @@ class DraftService:
             commit=False,
         )
 
-        # -----------------------------------------------------
-        # Commit draft + approval together.
-        # -----------------------------------------------------
-
         self.db.commit()
+
         self.db.refresh(draft)
         self.db.refresh(approval)
 
         logger.info(
-            "Generated draft %s for email %s. "
-            "Version=%s, approval=%s.",
+            "Generated draft ID %s for Email ID %s "
+            "User ID %s Version %s Approval %s.",
             draft.id,
             email.id,
+            user_id,
             draft.version,
             approval.status,
         )
@@ -180,7 +183,7 @@ class DraftService:
         return draft
 
     # =========================================================
-    # REWRITE DRAFT
+    # REWRITE
     # =========================================================
 
     async def rewrite_draft(
@@ -190,8 +193,10 @@ class DraftService:
         user_id: int | None = None,
     ) -> DraftReply:
 
+        user_id = self._require_user(user_id)
+
         draft = self.load_draft(
-            draft_id,
+            draft_id=draft_id,
             user_id=user_id,
         )
 
@@ -200,40 +205,17 @@ class DraftService:
                 f"Draft with ID {draft_id} not found."
             )
 
-        # -----------------------------------------------------
-        # IMPORTANT:
-        #
-        # Rewrite creates a NEW VERSION.
-        #
-        # Old:
-        #   version N
-        #   is_current = False
-        #   approval remains historical
-        #
-        # New:
-        #   version N+1
-        #   is_current = True
-        #   approval = PENDING
-        # -----------------------------------------------------
+        # generate_draft() will again verify that
+        # the email belongs to this same user.
 
-        new_draft = await self.generate_draft(
+        return await self.generate_draft(
             email_id=draft.email_id,
             tone=tone,
             user_id=user_id,
         )
 
-        logger.info(
-            "Rewrote draft %s → new draft %s. "
-            "New version=%s, approval=pending.",
-            draft.id,
-            new_draft.id,
-            new_draft.version,
-        )
-
-        return new_draft
-
     # =========================================================
-    # REGENERATE DRAFT
+    # REGENERATE
     # =========================================================
 
     async def regenerate_draft(
@@ -242,8 +224,10 @@ class DraftService:
         user_id: int | None = None,
     ) -> DraftReply:
 
+        user_id = self._require_user(user_id)
+
         draft = self.load_draft(
-            draft_id,
+            draft_id=draft_id,
             user_id=user_id,
         )
 
@@ -252,28 +236,14 @@ class DraftService:
                 f"Draft with ID {draft_id} not found."
             )
 
-        # -----------------------------------------------------
-        # Regeneration also creates a new version.
-        # -----------------------------------------------------
-
-        new_draft = await self.generate_draft(
+        return await self.generate_draft(
             email_id=draft.email_id,
             tone=draft.tone or "professional",
             user_id=user_id,
         )
 
-        logger.info(
-            "Regenerated draft %s → new draft %s. "
-            "New version=%s, approval=pending.",
-            draft.id,
-            new_draft.id,
-            new_draft.version,
-        )
-
-        return new_draft
-
     # =========================================================
-    # SAVE / EDIT EXISTING DRAFT
+    # SAVE / EDIT
     # =========================================================
 
     def save_draft(
@@ -283,8 +253,10 @@ class DraftService:
         user_id: int | None = None,
     ) -> DraftReply:
 
+        user_id = self._require_user(user_id)
+
         draft = self.load_draft(
-            draft_id,
+            draft_id=draft_id,
             user_id=user_id,
         )
 
@@ -298,22 +270,9 @@ class DraftService:
                 "Draft content cannot be empty."
             )
 
-        # -----------------------------------------------------
-        # Edit existing draft content.
-        # -----------------------------------------------------
-
         draft.draft = content.strip()
 
-        # -----------------------------------------------------
-        # IMPORTANT:
-        #
-        # Editing invalidates any previous approval.
-        #
-        # APPROVED → PENDING
-        # REJECTED → PENDING
-        # PENDING  → PENDING
-        # -----------------------------------------------------
-
+        # Editing invalidates approval.
         self.approval_service.reset_to_pending(
             draft_id=draft.id,
             user_id=user_id,
@@ -324,14 +283,16 @@ class DraftService:
         self.db.refresh(draft)
 
         logger.info(
-            "Edited draft %s. Approval reset to pending.",
-            draft.id,
+            "Edited Draft ID %s for User ID %s. "
+            "Approval reset to pending.",
+            draft_id,
+            user_id,
         )
 
         return draft
 
     # =========================================================
-    # CREATE VERSION FROM EXISTING DRAFT
+    # CREATE VERSION
     # =========================================================
 
     def version_draft(
@@ -341,8 +302,10 @@ class DraftService:
         user_id: int | None = None,
     ) -> DraftReply:
 
+        user_id = self._require_user(user_id)
+
         draft = self.load_draft(
-            draft_id,
+            draft_id=draft_id,
             user_id=user_id,
         )
 
@@ -357,11 +320,12 @@ class DraftService:
             )
 
         # -----------------------------------------------------
-        # Repository:
+        # Repository creates:
         #
         # latest version + 1
-        # old current = False
+        # previous current = False
         # new current = True
+        # correct user_id
         # -----------------------------------------------------
 
         new_draft = self.repository.create_draft(
@@ -371,10 +335,7 @@ class DraftService:
             tone=draft.tone or "professional",
         )
 
-        # -----------------------------------------------------
-        # New version ALWAYS starts pending.
-        # -----------------------------------------------------
-
+        # New version starts pending.
         approval = self.approval_service.reset_to_pending(
             draft_id=new_draft.id,
             user_id=user_id,
@@ -387,11 +348,13 @@ class DraftService:
         self.db.refresh(approval)
 
         logger.info(
-            "Created draft version %s (ID %s) "
-            "from draft ID %s. Approval=%s.",
+            "Created version %s Draft ID %s "
+            "from Draft ID %s for User ID %s. "
+            "Approval=%s.",
             new_draft.version,
             new_draft.id,
             draft.id,
+            user_id,
             approval.status,
         )
 
