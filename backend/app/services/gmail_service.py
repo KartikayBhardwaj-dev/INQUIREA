@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Any
 import base64
 from email.mime.text import MIMEText
@@ -103,7 +105,38 @@ class GmailService:
         return response.json()
 
     # =========================================================
-    # CREATE GMAIL DRAFT
+    # SUBJECT HELPER
+    # =========================================================
+
+    @staticmethod
+    def _reply_subject(subject: str) -> str:
+        """
+        Ensure the subject is formatted as a reply.
+
+        Examples:
+
+            Meeting
+                -> Re: Meeting
+
+            Re: Meeting
+                -> Re: Meeting
+
+            re: Meeting
+                -> Re: Meeting
+        """
+
+        subject = (subject or "").strip()
+
+        if not subject:
+            return "Re:"
+
+        if subject.lower().startswith("re:"):
+            return subject
+
+        return f"Re: {subject}"
+
+    # =========================================================
+    # CREATE GMAIL REPLY DRAFT
     # =========================================================
 
     async def create_draft(
@@ -112,7 +145,31 @@ class GmailService:
         subject: str,
         body: str,
         thread_id: str | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Create a Gmail draft.
+
+        For replies:
+
+            To:
+                original sender
+
+            Subject:
+                Re: original subject
+
+            Thread:
+                original Gmail thread ID
+
+            In-Reply-To:
+                original Gmail message ID, when available
+
+            References:
+                original Gmail message ID, when available
+
+        This allows Gmail to keep the draft inside the
+        correct conversation/thread.
+        """
 
         message = MIMEText(
             body,
@@ -120,8 +177,20 @@ class GmailService:
             "utf-8",
         )
 
-        message["to"] = to
-        message["subject"] = subject
+        message["To"] = to
+        message["Subject"] = self._reply_subject(subject)
+
+        # -----------------------------------------------------
+        # Reply headers
+        # -----------------------------------------------------
+
+        if message_id:
+            # Gmail message IDs are normally API IDs, not RFC
+            # Message-ID values. Therefore, only use this field
+            # if the value stored in your Email model represents
+            # the actual RFC Message-ID header.
+            message["In-Reply-To"] = message_id
+            message["References"] = message_id
 
         raw = base64.urlsafe_b64encode(
             message.as_bytes()
@@ -132,6 +201,10 @@ class GmailService:
                 "raw": raw,
             }
         }
+
+        # -----------------------------------------------------
+        # Gmail thread association
+        # -----------------------------------------------------
 
         if thread_id:
             payload["message"]["threadId"] = thread_id
@@ -148,7 +221,7 @@ class GmailService:
         return response.json()
 
     # =========================================================
-    # UPDATE GMAIL DRAFT
+    # UPDATE GMAIL REPLY DRAFT
     # =========================================================
 
     async def update_draft(
@@ -158,7 +231,14 @@ class GmailService:
         subject: str,
         body: str,
         thread_id: str | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
+        """
+        Update an existing Gmail reply draft.
+
+        The same reply/thread metadata is preserved when
+        updating the Gmail draft.
+        """
 
         message = MIMEText(
             body,
@@ -166,8 +246,12 @@ class GmailService:
             "utf-8",
         )
 
-        message["to"] = to
-        message["subject"] = subject
+        message["To"] = to
+        message["Subject"] = self._reply_subject(subject)
+
+        if message_id:
+            message["In-Reply-To"] = message_id
+            message["References"] = message_id
 
         raw = base64.urlsafe_b64encode(
             message.as_bytes()

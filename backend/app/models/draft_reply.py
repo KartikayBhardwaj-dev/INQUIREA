@@ -2,9 +2,15 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+)
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
 
 from backend.app.database.base import Base
 
@@ -54,34 +60,38 @@ class DraftReply(Base):
         index=True,
     )
 
-    # ---------------------------------------------------------
-    # Gmail Draft Lifecycle
-    # ---------------------------------------------------------
+    # =========================================================
+    # GMAIL DRAFT LIFECYCLE
+    # =========================================================
 
+    # Gmail Draft ID while the reply is still a Gmail draft.
     gmail_draft_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
 
+    # Gmail Message ID returned after the draft is sent.
     gmail_message_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )
 
+    # True only after Gmail successfully accepts the send.
     is_sent: Mapped[bool] = mapped_column(
         Boolean,
         default=False,
         nullable=False,
     )
 
+    # Timestamp of successful send.
     sent_at: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
     )
 
-    # ---------------------------------------------------------
-    # Timestamps
-    # ---------------------------------------------------------
+    # =========================================================
+    # TIMESTAMPS
+    # =========================================================
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -96,9 +106,9 @@ class DraftReply(Base):
         nullable=False,
     )
 
-    # ---------------------------------------------------------
-    # Relationships
-    # ---------------------------------------------------------
+    # =========================================================
+    # RELATIONSHIPS
+    # =========================================================
 
     approval: Mapped["Approval"] = relationship(
         "Approval",

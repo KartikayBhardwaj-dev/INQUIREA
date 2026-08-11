@@ -38,6 +38,7 @@ class GmailActionService:
             ↓
         is_sent = True
         gmail_message_id = Gmail message ID
+        sent_at = current time
         is_current = False
 
     Security invariants:
@@ -47,6 +48,8 @@ class GmailActionService:
         3. Only current draft can be sent.
         4. Approval must exist and be APPROVED.
         5. Gmail draft must exist before sending.
+        6. Gmail message ID must be returned before marking
+           the draft as sent.
     """
 
     def __init__(self, db: Session):
@@ -135,7 +138,7 @@ class GmailActionService:
             )
 
         # Defense-in-depth:
-        # Make sure the associated email belongs
+        # Ensure the associated email belongs
         # to the same authenticated user.
         self._load_email(
             email_id=draft.email_id,
@@ -154,13 +157,13 @@ class GmailActionService:
         user_id: int,
     ) -> dict[str, Any]:
         """
-        Create a Gmail draft from the current DB draft.
+        Save the current DB draft to Gmail.
 
-        This does NOT send the email.
+        This creates a Gmail Draft but does NOT send it.
 
-        DB state after success:
+        After success:
 
-            gmail_draft_id = <Gmail draft ID>
+            draft.gmail_draft_id = Gmail draft ID
         """
 
         draft = self._load_draft(
@@ -223,13 +226,13 @@ class GmailActionService:
         user_id: int,
     ) -> dict[str, Any]:
         """
-        Synchronize the current DB draft with Gmail.
+        Synchronize the DB draft with Gmail.
 
-        If Gmail draft does not exist:
-            create Gmail draft.
+        If no Gmail draft exists:
+            create one.
 
         If Gmail draft exists:
-            update existing Gmail draft.
+            update it.
         """
 
         draft = self._load_draft(
@@ -243,7 +246,7 @@ class GmailActionService:
         )
 
         # -----------------------------------------------------
-        # No Gmail draft yet.
+        # No Gmail draft exists yet.
         # -----------------------------------------------------
 
         if not draft.gmail_draft_id:
@@ -317,16 +320,16 @@ class GmailActionService:
             +
             Gmail draft exists
 
-        After successful send:
+        After successful Gmail send:
 
             is_sent = True
-            gmail_message_id = returned Gmail message ID
+            gmail_message_id = Gmail message ID
+            sent_at = current timestamp
             is_current = False
-            sent_at = now
         """
 
         # -----------------------------------------------------
-        # 1. Load and validate ownership.
+        # 1. Load draft and validate ownership.
         # -----------------------------------------------------
 
         draft = self._load_draft(
@@ -335,7 +338,7 @@ class GmailActionService:
         )
 
         # -----------------------------------------------------
-        # 2. Only current draft can be sent.
+        # 2. Prevent sending old/superseded versions.
         # -----------------------------------------------------
 
         if not draft.is_current:
@@ -373,11 +376,18 @@ class GmailActionService:
 
         # -----------------------------------------------------
         # 6. Send Gmail draft.
+        #
+        # IMPORTANT:
+        # Do NOT update the DB before this succeeds.
         # -----------------------------------------------------
 
         send_result = await gmail.send_draft(
             draft_id=draft.gmail_draft_id,
         )
+
+        # -----------------------------------------------------
+        # 7. Gmail must return the sent message ID.
+        # -----------------------------------------------------
 
         gmail_message_id = send_result.get(
             "id"
@@ -390,7 +400,7 @@ class GmailActionService:
             )
 
         # -----------------------------------------------------
-        # 7. Update DB.
+        # 8. Persist successful send state.
         # -----------------------------------------------------
 
         self._update_after_send(
@@ -431,7 +441,7 @@ class GmailActionService:
         ONLY approved drafts can be sent.
         """
 
-        # Ensure ownership first.
+        # Defense-in-depth ownership validation.
         draft = self._load_draft(
             draft_id=draft_id,
             user_id=user_id,
@@ -441,7 +451,7 @@ class GmailActionService:
             draft_id=draft.id,
         )
 
-        # Missing approval behaves as pending.
+        # Missing approval = pending.
         if approval is None:
             status = "pending"
         else:
@@ -464,18 +474,45 @@ class GmailActionService:
         gmail_message_id: str,
     ) -> None:
         """
-        Persist successful send state.
+        Persist the successful Gmail send.
+
+        Database state becomes:
+
+            is_sent = True
+            gmail_message_id = <Gmail message ID>
+            sent_at = current UTC time
+            is_current = False
         """
+
+        # -----------------------------------------------------
+        # Defense-in-depth ownership check.
+        # -----------------------------------------------------
 
         if draft.user_id != user_id:
             raise ValueError(
                 "You do not own this draft."
             )
 
+        # -----------------------------------------------------
+        # Persist send state.
+        # -----------------------------------------------------
+
         draft.is_sent = True
-        draft.is_current = False
         draft.gmail_message_id = gmail_message_id
         draft.sent_at = datetime.utcnow()
+        draft.is_current = False
+
+        # -----------------------------------------------------
+        # Commit transaction.
+        # -----------------------------------------------------
 
         self.db.commit()
         self.db.refresh(draft)
+
+        logger.info(
+            "Persisted sent state for draft %s. "
+            "gmail_message_id=%s sent_at=%s",
+            draft.id,
+            draft.gmail_message_id,
+            draft.sent_at,
+        )
