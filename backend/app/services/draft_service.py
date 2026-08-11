@@ -9,6 +9,7 @@ from backend.app.agents.reply_agent import ReplyAgent
 from backend.app.models.approval import Approval
 from backend.app.models.draft_reply import DraftReply
 from backend.app.models.email import Email
+from backend.app.repositories.draft_repository import DraftRepository
 
 logger = logging.getLogger(__name__)
 
@@ -22,26 +23,60 @@ class DraftService:
     - Generate drafts using ReplyAgent
     - Rewrite drafts
     - Regenerate drafts
-    - Persist drafts
-    - Version drafts
+    - Persist draft versions
+    - Manage approvals
     - Load drafts
     """
 
     def __init__(self, db: Session):
         self.db = db
         self.reply_agent = ReplyAgent()
+        self.repository = DraftRepository(db)
 
-    def _load_email(self, email_id: int, user_id: int | None = None) -> Email | None:
-        query = self.db.query(Email).filter(Email.id == email_id)
-        if user_id is not None and hasattr(Email, "user_id"):
-            query = query.filter(Email.user_id == user_id)
+    # ---------------------------------------------------------
+    # EMAIL
+    # ---------------------------------------------------------
+
+    def _load_email(
+        self,
+        email_id: int,
+        user_id: int | None = None,
+    ) -> Email | None:
+
+        query = (
+            self.db
+            .query(Email)
+            .filter(Email.id == email_id)
+        )
+
+        if (
+            user_id is not None
+            and hasattr(Email, "user_id")
+        ):
+            query = query.filter(
+                Email.user_id == user_id
+            )
+
         return query.first()
 
-    def load_draft(self, draft_id: int, user_id: int | None = None) -> DraftReply | None:
-        query = self.db.query(DraftReply).filter(DraftReply.id == draft_id)
-        if user_id is not None and hasattr(DraftReply, "user_id"):
-            query = query.filter(DraftReply.user_id == user_id)
-        return query.first()
+    # ---------------------------------------------------------
+    # DRAFT
+    # ---------------------------------------------------------
+
+    def load_draft(
+        self,
+        draft_id: int,
+        user_id: int | None = None,
+    ) -> DraftReply | None:
+
+        return self.repository.get_by_id(
+            draft_id=draft_id,
+            user_id=user_id,
+        )
+
+    # ---------------------------------------------------------
+    # GENERATE
+    # ---------------------------------------------------------
 
     async def generate_draft(
         self,
@@ -49,15 +84,20 @@ class DraftService:
         tone: str = "professional",
         user_id: int | None = None,
     ) -> DraftReply:
-        email = self._load_email(email_id, user_id=user_id)
-        if email is None:
-            raise ValueError(f"Email with ID {email_id} not found.")
 
-        # Deactivate previous active drafts for this email
-        self.db.query(DraftReply).filter(
-            DraftReply.email_id == email.id,
-            DraftReply.is_current == True, # noqa: E712
-        ).update({"is_current": False}, synchronize_session=False)
+        email = self._load_email(
+            email_id,
+            user_id=user_id,
+        )
+
+        if email is None:
+            raise ValueError(
+                f"Email with ID {email_id} not found."
+            )
+
+        # -----------------------------------------------------
+        # Generate content
+        # -----------------------------------------------------
 
         state = {
             "subject": email.subject,
@@ -66,32 +106,64 @@ class DraftService:
             "tone": tone,
         }
 
-        agent_result: dict[str, Any] = await self.reply_agent.execute(state)
-        generated_content = agent_result.get("draft_reply", "")
-
-        draft = DraftReply(
-            email_id=email.id,
-            draft=generated_content,
-            version=1,
-            tone=tone,
-            is_current=True,
+        agent_result: dict[str, Any] = (
+            await self.reply_agent.execute(state)
         )
-        if user_id is not None and hasattr(DraftReply, "user_id"):
-            setattr(draft, "user_id", user_id)
 
-        self.db.add(draft)
-        self.db.flush()
+        generated_content = (
+            agent_result.get("draft_reply", "")
+        )
+
+        if not generated_content:
+            raise ValueError(
+                "Reply agent did not generate draft content."
+            )
+
+        # -----------------------------------------------------
+        # IMPORTANT:
+        # Repository handles versioning.
+        #
+        # First generation:
+        #   version = 1
+        #
+        # Next generation:
+        #   version = latest + 1
+        # -----------------------------------------------------
+
+        draft = self.repository.create_draft(
+            email_id=email.id,
+            content=generated_content,
+            user_id=user_id,
+            tone=tone,
+        )
+
+        # -----------------------------------------------------
+        # Create approval for this version
+        # -----------------------------------------------------
 
         approval = Approval(
             draft_reply_id=draft.id,
             status="pending",
         )
+
         self.db.add(approval)
+
         self.db.commit()
         self.db.refresh(draft)
 
-        logger.info("Generated draft %s for email %s", draft.id, email.id)
+        logger.info(
+            "Generated draft %s for email %s "
+            "with version %s.",
+            draft.id,
+            email.id,
+            draft.version,
+        )
+
         return draft
+
+    # ---------------------------------------------------------
+    # REWRITE
+    # ---------------------------------------------------------
 
     async def rewrite_draft(
         self,
@@ -99,9 +171,20 @@ class DraftService:
         tone: str = "professional",
         user_id: int | None = None,
     ) -> DraftReply:
-        draft = self.load_draft(draft_id, user_id=user_id)
+
+        draft = self.load_draft(
+            draft_id,
+            user_id=user_id,
+        )
+
         if draft is None:
-            raise ValueError(f"Draft with ID {draft_id} not found.")
+            raise ValueError(
+                f"Draft with ID {draft_id} not found."
+            )
+
+        # -----------------------------------------------------
+        # Generate a new version for the same email.
+        # -----------------------------------------------------
 
         return await self.generate_draft(
             email_id=draft.email_id,
@@ -109,14 +192,25 @@ class DraftService:
             user_id=user_id,
         )
 
+    # ---------------------------------------------------------
+    # REGENERATE
+    # ---------------------------------------------------------
+
     async def regenerate_draft(
         self,
         draft_id: int,
         user_id: int | None = None,
     ) -> DraftReply:
-        draft = self.load_draft(draft_id, user_id=user_id)
+
+        draft = self.load_draft(
+            draft_id,
+            user_id=user_id,
+        )
+
         if draft is None:
-            raise ValueError(f"Draft with ID {draft_id} not found.")
+            raise ValueError(
+                f"Draft with ID {draft_id} not found."
+            )
 
         return await self.generate_draft(
             email_id=draft.email_id,
@@ -124,32 +218,58 @@ class DraftService:
             user_id=user_id,
         )
 
+    # ---------------------------------------------------------
+    # SAVE DRAFT
+    # ---------------------------------------------------------
+
     def save_draft(
         self,
         draft_id: int,
         content: str,
         user_id: int | None = None,
     ) -> DraftReply:
-        draft = self.load_draft(draft_id, user_id=user_id)
+
+        draft = self.load_draft(
+            draft_id,
+            user_id=user_id,
+        )
+
         if draft is None:
-            raise ValueError(f"Draft with ID {draft_id} not found.")
+            raise ValueError(
+                f"Draft with ID {draft_id} not found."
+            )
 
         draft.draft = content
 
-        # Reset approval status to pending upon content edits
+        # -----------------------------------------------------
+        # Content modification invalidates approval.
+        # -----------------------------------------------------
+
         approval = (
-            self.db.query(Approval)
-            .filter(Approval.draft_reply_id == draft.id)
+            self.db
+            .query(Approval)
+            .filter(
+                Approval.draft_reply_id == draft.id
+            )
             .first()
         )
+
         if approval:
             approval.status = "pending"
 
         self.db.commit()
         self.db.refresh(draft)
 
-        logger.info("Saved draft %s and reset approval to pending.", draft.id)
+        logger.info(
+            "Saved draft %s and reset approval to pending.",
+            draft.id,
+        )
+
         return draft
+
+    # ---------------------------------------------------------
+    # CREATE VERSION FROM EXISTING DRAFT
+    # ---------------------------------------------------------
 
     def version_draft(
         self,
@@ -157,35 +277,48 @@ class DraftService:
         content: str,
         user_id: int | None = None,
     ) -> DraftReply:
-        draft = self.load_draft(draft_id, user_id=user_id)
-        if draft is None:
-            raise ValueError(f"Draft with ID {draft_id} not found.")
 
-        # Mark former draft version as not current
-        draft.is_current = False
-
-        new_version_num = getattr(draft, "version", 1) + 1
-
-        new_draft = DraftReply(
-            email_id=draft.email_id,
-            draft=content,
-            version=new_version_num,
-            tone=draft.tone,
-            is_current=True,
+        draft = self.load_draft(
+            draft_id,
+            user_id=user_id,
         )
-        if user_id is not None and hasattr(DraftReply, "user_id"):
-            setattr(new_draft, "user_id", user_id)
 
-        self.db.add(new_draft)
-        self.db.flush()
+        if draft is None:
+            raise ValueError(
+                f"Draft with ID {draft_id} not found."
+            )
+
+        # -----------------------------------------------------
+        # Repository determines latest version and increments it.
+        # -----------------------------------------------------
+
+        new_draft = self.repository.create_draft(
+            email_id=draft.email_id,
+            content=content,
+            user_id=user_id,
+            tone=draft.tone or "professional",
+        )
+
+        # -----------------------------------------------------
+        # Every new version starts with pending approval.
+        # -----------------------------------------------------
 
         approval = Approval(
             draft_reply_id=new_draft.id,
             status="pending",
         )
+
         self.db.add(approval)
+
         self.db.commit()
         self.db.refresh(new_draft)
 
-        logger.info("Created draft version %s from draft %s", new_draft.id, draft.id)
+        logger.info(
+            "Created draft version %s (ID %s) "
+            "from draft ID %s.",
+            new_draft.version,
+            new_draft.id,
+            draft.id,
+        )
+
         return new_draft

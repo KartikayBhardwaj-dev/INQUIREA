@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text, Integer
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.app.database.base import Base
@@ -48,6 +50,7 @@ class DraftReply(Base):
         Boolean,
         default=True,
         nullable=False,
+        index=True,
     )
 
     # ---------------------------------------------------------
@@ -87,7 +90,10 @@ class DraftReply(Base):
         nullable=False,
     )
 
+    # ---------------------------------------------------------
     # Relationships
+    # ---------------------------------------------------------
+
     approval: Mapped["Approval"] = relationship(
         "Approval",
         back_populates="draft_reply",
