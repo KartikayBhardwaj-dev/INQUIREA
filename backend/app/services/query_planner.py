@@ -1,67 +1,135 @@
 from __future__ import annotations
-from pydantic import ConfigDict
+
 import logging
+import re
 from typing import Any, Literal
-from pydantic import BaseModel, Field
+
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain_core.prompts import ChatPromptTemplate
+from pydantic import BaseModel, ConfigDict, Field
 
-from backend.app.core.llm import get_llm
 from backend.app.core.config import EmailCategory
+from backend.app.core.llm import get_llm
 
 logger = logging.getLogger(__name__)
 
 
 class QueryPlan(BaseModel):
     model_config = ConfigDict(extra="ignore")
+
     intent: Literal[
         "semantic_search",
         "summarize",
         "sender_lookup",
         "deadline_search",
         "metadata_search",
-    ] = Field(description="Overall intent of the user's request.")
+    ] = Field(
+        description="Overall intent of the user's request."
+    )
 
     semantic_query: str | None = Field(
         default=None,
-        description="Optimized semantic search query. Rewrite vague user questions into better search phrases.",
+        description=(
+            "Optimized semantic search query. "
+            "Rewrite vague user questions into better search phrases."
+        ),
     )
 
-    category: str | None = Field(default=None, description="Email category filter.")
-    priority: Literal["low", "medium", "high", "urgent"] | None = Field(default=None, description="Priority filter.")
-    sender: str | None = Field(default=None, description="Specific sender if requested.")
+    category: str | None = Field(
+        default=None,
+        description="Email category filter.",
+    )
+
+    priority: Literal[
+        "low",
+        "medium",
+        "high",
+        "urgent",
+    ] | None = Field(
+        default=None,
+        description="Priority filter.",
+    )
+
+    sender: str | None = Field(
+        default=None,
+        description="Specific sender if requested.",
+    )
+
     requires_reply: bool | None = Field(
         default=None,
-        description="Whether only emails requiring a reply should be returned.",
+        description=(
+            "Whether only emails requiring a reply "
+            "should be returned."
+        ),
     )
-    retrieve_limit: int = Field(default=5, ge=1, le=50, description="Maximum number of emails to retrieve.")
-    sort_by: Literal["relevance", "date", "priority"] = Field(default="relevance", description="Sorting strategy.")
-    date_from: str | None = Field(default=None, description="Inclusive ISO date lower bound.")
-    date_to: str | None = Field(default=None, description="Inclusive ISO date upper bound.")
+
+    retrieve_limit: int = Field(
+        default=5,
+        ge=1,
+        le=50,
+        description="Maximum number of emails to retrieve.",
+    )
+
+    sort_by: Literal[
+        "relevance",
+        "date",
+        "priority",
+    ] = Field(
+        default="relevance",
+        description="Sorting strategy.",
+    )
+
+    date_from: str | None = Field(
+        default=None,
+        description="Inclusive ISO date lower bound.",
+    )
+
+    date_to: str | None = Field(
+        default=None,
+        description="Inclusive ISO date upper bound.",
+    )
+
     reasoning: str = Field(
-    default="",
-    description="Short explanation..."
-)
-    
+        default="",
+        description="Short explanation of the planning decision.",
+    )
+
     needs_tool: bool = Field(
         default=False,
-        description="Whether this request should execute a Level 2 tool."
+        description="Whether this request should execute a Level 2 tool.",
     )
+
     tool_name: str | None = Field(
         default=None,
-        description="Registered tool name to execute."
+        description="Registered tool name to execute.",
     )
-    tool_arguments: dict[str, Any] | None = Field(
-    default_factory=dict
-)
-    needs_clarification: bool = False
-    clarification_message: str | None = None
+
+    tool_arguments: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Arguments passed to the selected tool.",
+    )
+
+    needs_clarification: bool = Field(
+        default=False,
+        description="Whether the request needs clarification.",
+    )
+
+    clarification_message: str | None = Field(
+        default=None,
+        description="Message explaining what information is missing.",
+    )
 
 
 class QueryPlanner:
+
     def __init__(self):
-        self.parser = PydanticOutputParser(pydantic_object=QueryPlan)
-        categories_list = ", ".join([c.value for c in EmailCategory])
+        self.parser = PydanticOutputParser(
+            pydantic_object=QueryPlan
+        )
+
+        categories_list = ", ".join(
+            [c.value for c in EmailCategory]
+        )
 
         self.prompt = ChatPromptTemplate.from_messages(
             [
@@ -69,14 +137,19 @@ class QueryPlanner:
                     "system",
                     f"""
 You are the Retrieval Planning Engine for INQUIREA.
-Your ONLY responsibility is to transform a user's inbox question into a structured QueryPlan based on their prompt and past conversation history.
 
-You NEVER answer the user's question, summarize emails, or invent facts.
-Return ONLY valid JSON matching the provided schema.
+Your ONLY responsibility is to transform the user's request
+into a structured QueryPlan.
+
+You NEVER answer the user's question.
+You NEVER summarize emails.
+You NEVER invent IDs.
+You ONLY return valid JSON matching the QueryPlan schema.
 
 ========================================================
 AVAILABLE INTENTS
 ========================================================
+
 1. semantic_search
 2. summarize
 3. metadata_search
@@ -86,39 +159,41 @@ AVAILABLE INTENTS
 Choose exactly ONE intent.
 
 ========================================================
-CONVERSATIONAL CONTEXT RULES
+CONVERSATIONAL CONTEXT
 ========================================================
-Use the provided conversation history to resolve coreferences (e.g., "only those", "from the same sender", "the latest ones").
-If the current phrase is dependent on historical context, populate the fields based on what was discussed.
 
-========================================================
-SEMANTIC QUERY REWRITING & DATE RULES
-========================================================
-Rewrite vague expressions into solid search targets. 
-CRITICAL DATE RULE: If a date phrase appears inside a contextual search target (e.g., "July 31 Interview", "Assignment due Friday"), do NOT use metadata date fields. Keep the date term inside the `semantic_query`! Only map to metadata dates (`date_from`/`date_to`) if the user explicitly uses tracking boundaries like "received after", "sent yesterday", "this week".
+Use conversation history to resolve references such as:
 
-========================================================
-CATEGORY DETECTION
-========================================================
-Populate category ONLY if it explicitly matches one of these valid system terms:
-{categories_list}
+- "it"
+- "this draft"
+- "that email"
+- "make it shorter"
+- "make it professional"
+- "make it friendlier"
+- "change the ending"
+- "regenerate it"
+- "approve it"
+- "send it"
 
-If it matches any other category concept or you are uncertain, keep it null.
+If the current request depends on a previous draft,
+find the draft_id from conversation history.
 
-========================================================
-PRIORITY & REPLY DETECTION
-========================================================
-Map priority precisely or default to null. Map `requires_reply` to true if the prompt explicitly looks for actionable or unresolved interactions.
+If the current request contains an explicit ID,
+ALWAYS prefer the current request's ID.
+
+NEVER invent an ID.
 
 ========================================================
 LEVEL 2 TOOL ROUTING
 ========================================================
 
-If the user's request is asking to PERFORM an action rather than retrieve information, set:
+If the user wants an ACTION rather than information,
+set:
 
 needs_tool = true
 
 Available tools:
+
 - search_emails
 - get_email
 - generate_reply
@@ -130,141 +205,452 @@ Available tools:
 - update_draft
 - send_reply
 
-IMPORTANT ID RULES
+========================================================
+GENERATE REPLY
+========================================================
 
-• NEVER invent an email_id.
-• NEVER invent a draft_id.
-• Priority 1:
-Use IDs mentioned in the CURRENT USER QUESTION.
+Example:
+
+User:
+Generate a reply to email 10.
+
+Output:
+
+needs_tool = true
+tool_name = "generate_reply"
+
+tool_arguments = {{
+    "email_id": 10,
+    "tone": "professional"
+}}
+
+========================================================
+REWRITE REPLY
+========================================================
+
+IMPORTANT:
+
+rewrite_reply MUST use:
+
+draft_id
+
+and an instruction.
+
+The instruction is NOT limited to tone.
+
+Use:
+
+"instruction"
+
+for requests such as:
+
+- make it shorter
+- make it concise
+- make it more professional
+- make it friendly
+- make it friendlier
+- change the ending
+- remove unnecessary details
+- make it clearer
+- simplify this
+- make it more formal
+- make it less formal
+
+Examples:
+
+User:
+Make draft 15 shorter.
+
+Output:
+
+needs_tool = true
+tool_name = "rewrite_reply"
+
+tool_arguments = {{
+    "draft_id": 15,
+    "instruction": "make it shorter"
+}}
+
+User:
+Make draft 15 more professional.
+
+Output:
+
+needs_tool = true
+tool_name = "rewrite_reply"
+
+tool_arguments = {{
+    "draft_id": 15,
+    "instruction": "make it more professional"
+}}
+
+User:
+Change the ending.
+
+If conversation history identifies draft 15:
+
+needs_tool = true
+tool_name = "rewrite_reply"
+
+tool_arguments = {{
+    "draft_id": 15,
+    "instruction": "change the ending"
+}}
+
+User:
+Make it friendlier.
+
+If conversation history identifies draft 15:
+
+needs_tool = true
+tool_name = "rewrite_reply"
+
+tool_arguments = {{
+    "draft_id": 15,
+    "instruction": "make it friendlier"
+}}
+
+========================================================
+REWRITE INSTRUCTION RULE
+========================================================
+
+For rewrite_reply:
+
+- Always include draft_id.
+- Always include instruction.
+- Preserve the user's intended instruction.
+- Do NOT convert every instruction into a tone.
+- "shorter" is an instruction.
+- "more professional" is an instruction.
+- "change the ending" is an instruction.
+- "remove unnecessary details" is an instruction.
+
+The instruction should be a concise normalized version
+of the user's request.
+
+========================================================
+EDIT DRAFT
+========================================================
+
+Use edit_draft only when the user explicitly provides
+the replacement draft content.
+
+Example:
+
+User:
+Replace the draft with:
+Hi Google Team,
+
+Thanks for reaching out.
+
+Best,
+Kartikay
+
+Output:
+
+needs_tool = true
+tool_name = "edit_draft"
+
+tool_arguments = {{
+    "draft_id": <draft_id>,
+    "content": "Hi Google Team,\\n\\nThanks for reaching out.\\n\\nBest,\\nKartikay"
+}}
+
+The draft_id may come from conversation history.
+
+========================================================
+APPROVE
+========================================================
+
+User:
+Approve draft 15.
+
+Output:
+
+needs_tool = true
+tool_name = "approve_draft"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+User:
+Approve it.
+
+If conversation history identifies draft 15:
+
+tool_name = "approve_draft"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+========================================================
+REJECT
+========================================================
+
+User:
+Reject draft 15.
+
+Output:
+
+needs_tool = true
+tool_name = "reject_draft"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+========================================================
+SAVE DRAFT
+========================================================
+
+User:
+Save draft 15 to Gmail.
+
+Output:
+
+needs_tool = true
+tool_name = "save_draft"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+========================================================
+UPDATE DRAFT
+========================================================
+
+User:
+Update draft 15.
+
+Output:
+
+needs_tool = true
+tool_name = "update_draft"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+========================================================
+SEND REPLY
+========================================================
+
+User:
+Send draft 15.
+
+Output:
+
+needs_tool = true
+tool_name = "send_reply"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+User:
+Send it.
+
+If conversation history identifies draft 15:
+
+tool_name = "send_reply"
+
+tool_arguments = {{
+    "draft_id": 15
+}}
+
+========================================================
+ID RULES
+========================================================
+
+NEVER invent email_id.
+NEVER invent draft_id.
+
+Priority 1:
+Use an ID explicitly mentioned in the CURRENT USER QUESTION.
 
 Priority 2:
-If the current question does not contain an ID,
-look in the conversation history.
+Use an ID from conversation history.
 
-Only if neither contains an ID,
-return tool_arguments = {{{{}}}} and
-needs_clarification = true.
-• If no valid ID can be determined, return tool_arguments as  an empty JSON object
-• Never copy IDs from these instructions.
+If neither exists:
 
-Examples
+tool_arguments = {{}}
+needs_clarification = true
 
-User:
-Generate a reply for email <email_id>
-
-Output:
-tool_name = "generate_reply"
-tool_arguments = {{{{
-    "email_id": <email_id>,
-    "tone": "professional"
-}}}}
-
-User:
-Rewrite this politely
-
-Output:
-tool_name = "rewrite_reply"
-tool_arguments = {{{{
-    "tone": "friendly"
-}}}}
-
-User:
-Save draft <draft_id>
-
-Output:
-tool_name = "save_draft"
-tool_arguments = {{{{
-    "draft_id": <draft_id>
-}}}}
-
-User:
-Update draft <draft_id>
-
-Output:
-tool_name = "update_draft"
-tool_arguments = {{{{
-    "draft_id": <draft_id>
-}}}}
-
-User:
-Send draft <draft_id>
-
-Output:
-tool_name = "send_reply"
-tool_arguments = {{{{
-    "draft_id": <draft_id>
-}}}}
-
-User:
-Approve draft 15
-
-Output:
-tool_name = "approve_draft"
-tool_arguments = {{{{
-    "draft_id": 15
-}}}}
-
-User:
-Approve draft_reply_id 15
-
-Output:
-tool_name = "approve_draft"
-tool_arguments = {{{{
-    "draft_id": 15
-}}}}
-
-User:
-Reject draft 15
-
-Output:
-tool_name = "reject_draft"
-tool_arguments = {{{{
-    "draft_id": 15
-}}}}
-If the conversation contains the draft ID, reuse it.
-
-
-tool_arguments = {{{{}}}}
-
-Default tone is "professional".
-
+Do NOT execute the tool.
 
 ========================================================
-RETRIEVE LIMIT & SORTING RULES
+TONE
 ========================================================
-Default: sort_by = relevance. If the user requests latest/recent -> sort_by = date. If highest priority -> sort_by = priority.
-Limits: normal/metadata = 5, sender/deadline = 10, summarize = 20.
 
-{{format_instructions}}
+Tone is optional metadata.
 
-IMPORTANT
+For generate_reply:
+default tone = "professional"
 
-Do NOT create nested objects.
+For rewrite_reply:
+DO NOT add a tone field unless the instruction itself
+is specifically a tone request.
 
-Do NOT output keys not defined in the schema.
+The primary rewrite field is:
 
-Every field must exist at the top level.
+"instruction"
 
-If tool_arguments is unused, return an empty JSON object.
+Examples:
+
+"Make it shorter"
+-> instruction = "make it shorter"
+
+"Make it more professional"
+-> instruction = "make it more professional"
+
+"Make it friendly"
+-> instruction = "make it friendly"
+
+"Change the ending"
+-> instruction = "change the ending"
+
+========================================================
+SEMANTIC SEARCH
+========================================================
+
+If the request is information retrieval rather than an action,
+do not use a tool.
+
+Use the retrieval fields normally.
+
+========================================================
+DATE RULES
+========================================================
+
+If a date phrase appears inside a contextual search target
+such as:
+
+"July 31 interview"
+"assignment due Friday"
+
+keep it inside semantic_query.
+
+Only use date_from/date_to when the user explicitly requests
+date filtering such as:
+
+- received after
+- received before
+- sent yesterday
+- received this week
+
+========================================================
+CATEGORY
+========================================================
+
+Populate category ONLY if it explicitly matches one of:
+
+{categories_list}
+
+Otherwise use null.
+
+========================================================
+PRIORITY
+========================================================
+
+Map:
+
+low
+medium
+high
+urgent
+
+Otherwise use null.
+
+========================================================
+RETRIEVAL LIMIT
+========================================================
+
+Default:
+5
+
+Sender/deadline:
+10
+
+Summarize:
+20
+
+Maximum:
+50
+
+========================================================
+SORTING
+========================================================
+
+Default:
+relevance
+
+latest/recent:
+date
+
+highest priority:
+priority
+
+========================================================
+IMPORTANT OUTPUT RULES
+========================================================
+
+Return ONLY valid JSON.
+
+Do NOT create nested objects outside tool_arguments.
+
+Do NOT create fields that are not defined by QueryPlan.
+
+tool_arguments must always be an object.
 
 reasoning must always be present.
 
-Return ONLY the JSON object.
+{{
+format_instructions
+}}
 """,
                 ),
-                ("user", "Conversation History:\n{conversation_history}\n\nCurrent Question: {question}"),
+                (
+                    "user",
+                    "Conversation History:\n"
+                    "{conversation_history}\n\n"
+                    "Current Question:\n"
+                    "{question}",
+                ),
             ]
         )
 
-    async def plan(self, question: str, conversation: list[dict] | None = None) -> QueryPlan:
+    async def plan(
+        self,
+        question: str,
+        conversation: list[dict] | None = None,
+    ) -> QueryPlan:
+
         history_str = "No previous conversation history."
+
         if conversation:
             history_str = "\n".join(
-                [f"{m.get('role', 'user').capitalize()}: {m.get('message', m.get('content', ''))}" for m in conversation]
+                [
+                    (
+                        f"{m.get('role', 'user').capitalize()}: "
+                        f"{m.get('message', m.get('content', ''))}"
+                    )
+                    for m in conversation
+                ]
             )
 
         llm_instance = get_llm()
-        chain = self.prompt.partial(format_instructions=self.parser.get_format_instructions()) | llm_instance | self.parser
+
+        chain = (
+            self.prompt.partial(
+                format_instructions=(
+                    self.parser.get_format_instructions()
+                )
+            )
+            | llm_instance
+            | self.parser
+        )
 
         try:
             plan: QueryPlan = await chain.ainvoke(
@@ -273,13 +659,12 @@ Return ONLY the JSON object.
                     "conversation_history": history_str,
                 }
             )
-            plan.reasoning = plan.reasoning or ""
 
-            plan.tool_arguments = plan.tool_arguments or {}
-        except Exception as e:
-            logger.exception("Failed to parse QueryPlan from LLM response.")
+        except Exception:
+            logger.exception(
+                "Failed to parse QueryPlan from LLM response."
+            )
 
-            logger.exception(e)
             return QueryPlan(
                 intent="semantic_search",
                 semantic_query=question,
@@ -294,46 +679,86 @@ Return ONLY the JSON object.
                 needs_tool=False,
                 tool_name=None,
                 tool_arguments={},
-                reasoning="Fallback retrieval plan generated after planner failure.",
+                reasoning=(
+                    "Fallback retrieval plan generated "
+                    "after planner failure."
+                ),
             )
 
         # --------------------------------------------------
-        # Post-Processing Normalization
+        # Normalize basic fields
         # --------------------------------------------------
+
+        plan.reasoning = plan.reasoning or ""
+        plan.tool_arguments = plan.tool_arguments or {}
+
         if not plan.semantic_query:
             plan.semantic_query = question
         else:
-            plan.semantic_query = plan.semantic_query.strip()
+            plan.semantic_query = (
+                plan.semantic_query.strip()
+            )
 
         if plan.priority:
-            plan.priority = plan.priority.lower().strip()
-            if plan.priority not in {"low", "medium", "high", "urgent"}:
+            plan.priority = (
+                plan.priority.lower().strip()
+            )
+
+            if plan.priority not in {
+                "low",
+                "medium",
+                "high",
+                "urgent",
+            }:
                 plan.priority = None
 
         if plan.category:
-            plan.category = plan.category.strip().lower()
-            if plan.category not in [c.value for c in EmailCategory]:
+            plan.category = (
+                plan.category.strip().lower()
+            )
+
+            if plan.category not in [
+                c.value for c in EmailCategory
+            ]:
                 plan.category = None
 
         if plan.sender:
             plan.sender = plan.sender.strip()
+
         if plan.date_from:
             plan.date_from = plan.date_from.strip()
+
         if plan.date_to:
             plan.date_to = plan.date_to.strip()
 
-        plan.retrieve_limit = max(1, min(plan.retrieve_limit, 50))
+        plan.retrieve_limit = max(
+            1,
+            min(plan.retrieve_limit, 50),
+        )
 
-        if plan.sort_by not in {"relevance", "date", "priority"}:
+        if plan.sort_by not in {
+            "relevance",
+            "date",
+            "priority",
+        }:
             plan.sort_by = "relevance"
 
-        if plan.intent == "summarize" and plan.retrieve_limit < 20:
+        if (
+            plan.intent == "summarize"
+            and plan.retrieve_limit < 20
+        ):
             plan.retrieve_limit = 20
 
-        if plan.intent == "deadline_search" and plan.sort_by != "date":
+        if (
+            plan.intent == "deadline_search"
+            and plan.sort_by != "date"
+        ):
             plan.sort_by = "date"
 
-        # Validate Tool Execution Parameters
+        # --------------------------------------------------
+        # Normalize tool name
+        # --------------------------------------------------
+
         valid_tools = {
             "search_emails",
             "get_email",
@@ -348,43 +773,144 @@ Return ONLY the JSON object.
         }
 
         if plan.tool_name:
-            plan.tool_name = plan.tool_name.strip().lower()
+            plan.tool_name = (
+                plan.tool_name.strip().lower()
+            )
 
-        required_tool_arguments = {
-    "send_reply": ["draft_id"],
-    "update_draft": ["draft_id"],
-    "approve_draft": ["draft_id"],
-    "reject_draft": ["draft_id"],
-    "get_email": ["email_id"],
-    "generate_reply": ["email_id"],
-}
         if plan.tool_name not in valid_tools:
-            plan.needs_tool = False
-            plan.tool_name = None
-            plan.tool_arguments = {}
-
-
-        if plan.needs_tool:
-            required = required_tool_arguments.get(plan.tool_name, [])
-
-            if any(plan.tool_arguments.get(arg) is None for arg in required):
+            if plan.needs_tool:
                 plan.needs_tool = False
                 plan.tool_name = None
                 plan.tool_arguments = {}
 
-# always normalize afterwards
-        if plan.tool_name in {"generate_reply", "rewrite_reply"}:
-            plan.tool_arguments.setdefault("tone", "professional")
-
-        import re
+        # --------------------------------------------------
+        # Normalize IDs
+        # --------------------------------------------------
 
         for key in ("email_id", "draft_id"):
             value = plan.tool_arguments.get(key)
 
+            if isinstance(value, int):
+                continue
+
             if isinstance(value, str):
-                match = re.search(r"\d+", value)
+                match = re.search(
+                    r"\d+",
+                    value,
+                )
 
                 if match:
-                    plan.tool_arguments[key] = int(match.group())
-        
+                    plan.tool_arguments[key] = int(
+                        match.group()
+                    )
+
+        # --------------------------------------------------
+        # Required arguments
+        # --------------------------------------------------
+
+        required_tool_arguments = {
+            "send_reply": ["draft_id"],
+            "update_draft": ["draft_id"],
+            "save_draft": ["draft_id"],
+            "approve_draft": ["draft_id"],
+            "reject_draft": ["draft_id"],
+            "get_email": ["email_id"],
+            "generate_reply": ["email_id"],
+            "rewrite_reply": [
+                "draft_id",
+                "instruction",
+            ],
+            "edit_draft": [
+                "draft_id",
+                "content",
+            ],
+        }
+
+        # --------------------------------------------------
+        # Tool-specific normalization
+        # --------------------------------------------------
+
+        if plan.tool_name == "generate_reply":
+            plan.tool_arguments.setdefault(
+                "tone",
+                "professional",
+            )
+
+        if plan.tool_name == "rewrite_reply":
+
+            instruction = plan.tool_arguments.get(
+                "instruction"
+            )
+
+            if instruction is not None:
+                instruction = str(
+                    instruction
+                ).strip()
+
+                if instruction:
+                    plan.tool_arguments[
+                        "instruction"
+                    ] = instruction
+                else:
+                    plan.tool_arguments.pop(
+                        "instruction",
+                        None,
+                    )
+
+        # --------------------------------------------------
+        # Validate required arguments
+        # --------------------------------------------------
+
+        if plan.needs_tool:
+
+            required = required_tool_arguments.get(
+                plan.tool_name,
+                [],
+            )
+
+            missing = [
+                argument
+                for argument in required
+                if (
+                    plan.tool_arguments.get(argument)
+                    is None
+                    or (
+                        isinstance(
+                            plan.tool_arguments.get(argument),
+                            str,
+                        )
+                        and not plan.tool_arguments.get(
+                            argument
+                        ).strip()
+                    )
+                )
+            ]
+
+            if missing:
+
+                plan.needs_clarification = True
+
+                if plan.tool_name == "rewrite_reply":
+                    plan.clarification_message = (
+                        "I need the draft you want to "
+                        "rewrite and the rewrite instruction."
+                    )
+
+                elif plan.tool_name == "edit_draft":
+                    plan.clarification_message = (
+                        "I need the draft ID and the "
+                        "new draft content."
+                    )
+
+                else:
+                    plan.clarification_message = (
+                        f"Missing required information: "
+                        f"{', '.join(missing)}."
+                    )
+
+                # Do NOT execute incomplete tool calls.
+                plan.needs_tool = False
+                plan.tool_name = None
+                plan.tool_arguments = {}
+
         return plan
