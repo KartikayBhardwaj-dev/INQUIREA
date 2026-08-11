@@ -5,6 +5,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+
 from backend.app.database.base import Base
 
 
@@ -16,10 +17,6 @@ class DraftReply(Base):
         autoincrement=True,
     )
 
-    # ---------------------------------------------------------
-    # Email
-    # ---------------------------------------------------------
-
     email_id: Mapped[int] = mapped_column(
         Integer,
         ForeignKey("emails.id"),
@@ -27,22 +24,11 @@ class DraftReply(Base):
         nullable=False,
     )
 
-    # ---------------------------------------------------------
-    # Ownership
-    # ---------------------------------------------------------
-
-    user_id: Mapped[int] = mapped_column(
+    user_id: Mapped[int | None] = mapped_column(
         Integer,
+        nullable=True,
         index=True,
-        nullable=False,
     )
-
-    # Every draft MUST belong to a user.
-    # This prevents accidental cross-user draft creation.
-
-    # ---------------------------------------------------------
-    # Draft
-    # ---------------------------------------------------------
 
     draft: Mapped[str] = mapped_column(
         Text,
@@ -69,10 +55,15 @@ class DraftReply(Base):
     )
 
     # ---------------------------------------------------------
-    # Gmail Sync
+    # Gmail Draft Lifecycle
     # ---------------------------------------------------------
 
     gmail_draft_id: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True,
+    )
+
+    gmail_message_id: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
     )

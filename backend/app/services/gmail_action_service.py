@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
 from sqlalchemy.orm import Session
@@ -13,6 +14,7 @@ from backend.app.services.draft_service import DraftService
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.google_token_service import GoogleTokenService
 
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,18 +22,36 @@ class GmailActionService:
     """
     Gmail action orchestration service.
 
-    Security invariants
-    -------------------
-    1. Draft must belong to the authenticated user.
-    2. Email must belong to the authenticated user.
-    3. Approval must exist.
-    4. Draft approval status must be APPROVED before sending.
-    5. Draft must have a Gmail draft ID before sending.
-    6. Only the current draft version can be sent.
+    Lifecycle:
+
+        Generate
+            ↓
+        DB Draft
+            ↓
+        Edit DB Draft
+            ↓
+        Save / Update Gmail Draft
+            ↓
+        Approve
+            ↓
+        Send
+            ↓
+        is_sent = True
+        gmail_message_id = Gmail message ID
+        is_current = False
+
+    Security invariants:
+
+        1. Draft belongs to authenticated user.
+        2. Email belongs to authenticated user.
+        3. Only current draft can be sent.
+        4. Approval must exist and be APPROVED.
+        5. Gmail draft must exist before sending.
     """
 
     def __init__(self, db: Session):
         self.db = db
+
         self.approval_service = ApprovalService(db)
         self.draft_service = DraftService(db)
 
@@ -43,14 +63,19 @@ class GmailActionService:
         self,
         user_id: int,
     ) -> GmailService:
+
         user = (
             self.db.query(User)
-            .filter(User.id == user_id)
+            .filter(
+                User.id == user_id,
+            )
             .first()
         )
 
         if user is None:
-            raise ValueError("User not found.")
+            raise ValueError(
+                "User not found."
+            )
 
         access_token = (
             await GoogleTokenService.refresh_access_token(
@@ -59,7 +84,9 @@ class GmailActionService:
             )
         )
 
-        return GmailService(access_token)
+        return GmailService(
+            access_token,
+        )
 
     # =========================================================
     # EMAIL OWNERSHIP
@@ -70,9 +97,6 @@ class GmailActionService:
         email_id: int,
         user_id: int,
     ) -> Email:
-        """
-        Load an email only if it belongs to the authenticated user.
-        """
 
         email = (
             self.db.query(Email)
@@ -99,12 +123,6 @@ class GmailActionService:
         draft_id: int,
         user_id: int,
     ) -> DraftReply:
-        """
-        Load a draft only if:
-
-        - draft belongs to user
-        - associated email belongs to user
-        """
 
         draft = self.draft_service.load_draft(
             draft_id=draft_id,
@@ -116,7 +134,9 @@ class GmailActionService:
                 f"Draft {draft_id} not found."
             )
 
-        # Defense-in-depth ownership validation.
+        # Defense-in-depth:
+        # Make sure the associated email belongs
+        # to the same authenticated user.
         self._load_email(
             email_id=draft.email_id,
             user_id=user_id,
@@ -125,114 +145,7 @@ class GmailActionService:
         return draft
 
     # =========================================================
-    # SEND REPLY
-    # =========================================================
-
-    async def send_reply(
-        self,
-        draft_id: int,
-        user_id: int,
-    ) -> dict[str, Any]:
-        """
-        Send a draft through Gmail.
-
-        A draft can ONLY be sent when:
-
-            draft exists
-            +
-            draft belongs to user
-            +
-            email belongs to user
-            +
-            draft is current
-            +
-            approval exists
-            +
-            approval == approved
-            +
-            Gmail draft ID exists
-        """
-
-        # -----------------------------------------------------
-        # 1. Validate draft + ownership
-        # -----------------------------------------------------
-
-        draft = self._load_draft(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
-
-        # -----------------------------------------------------
-        # 2. Only current version may be sent
-        # -----------------------------------------------------
-
-        if not draft.is_current:
-            raise ValueError(
-                f"Draft {draft_id} cannot be sent. "
-                "It is not the current draft version."
-            )
-
-        # -----------------------------------------------------
-        # 3. Approval is mandatory
-        # -----------------------------------------------------
-
-        self._ensure_approved(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
-
-        # -----------------------------------------------------
-        # 4. Gmail draft must exist
-        # -----------------------------------------------------
-
-        if not draft.gmail_draft_id:
-            raise ValueError(
-                f"Draft {draft_id} has no Gmail draft ID. "
-                "Save draft to Gmail first."
-            )
-
-        # -----------------------------------------------------
-        # 5. Get authenticated user's Gmail service
-        # -----------------------------------------------------
-
-        gmail = await self._get_gmail_service(
-            user_id=user_id,
-        )
-
-        # -----------------------------------------------------
-        # 6. Send Gmail draft
-        # -----------------------------------------------------
-
-        send_result = await gmail.send_draft(
-            draft_id=draft.gmail_draft_id,
-        )
-
-        # -----------------------------------------------------
-        # 7. Mark database state as sent
-        # -----------------------------------------------------
-
-        self._update_after_send(
-            draft=draft,
-            user_id=user_id,
-        )
-
-        logger.info(
-            "Draft %s successfully sent by user %s.",
-            draft_id,
-            user_id,
-        )
-
-        return {
-            "success": True,
-            "draft_id": draft_id,
-            "message": (
-                f"Draft {draft_id} successfully sent."
-            ),
-            "gmail_message_id": send_result.get("id"),
-        }
-
-    # =========================================================
-    # SAVE TO GMAIL
+    # SAVE DRAFT TO GMAIL
     # =========================================================
 
     async def save_draft(
@@ -241,11 +154,13 @@ class GmailActionService:
         user_id: int,
     ) -> dict[str, Any]:
         """
-        Save the user's draft to Gmail.
+        Create a Gmail draft from the current DB draft.
 
-        Approval is NOT required to save a Gmail draft.
+        This does NOT send the email.
 
-        Approval is required only when sending.
+        DB state after success:
+
+            gmail_draft_id = <Gmail draft ID>
         """
 
         draft = self._load_draft(
@@ -269,31 +184,32 @@ class GmailActionService:
             thread_id=email.gmail_thread_id,
         )
 
-        gmail_draft_id = gmail_result.get("id")
+        gmail_draft_id = gmail_result.get(
+            "id"
+        )
 
         if not gmail_draft_id:
             raise ValueError(
                 "Gmail did not return a draft ID."
             )
 
-        self._update_after_save(
-            draft=draft,
-            gmail_draft_id=gmail_draft_id,
-            user_id=user_id,
-        )
+        draft.gmail_draft_id = gmail_draft_id
+
+        self.db.commit()
+        self.db.refresh(draft)
 
         logger.info(
-            "Draft %s saved to Gmail by user %s.",
-            draft_id,
-            user_id,
+            "Draft %s saved to Gmail. Gmail draft ID=%s",
+            draft.id,
+            gmail_draft_id,
         )
 
         return {
             "success": True,
-            "draft_id": draft_id,
+            "draft_id": draft.id,
             "gmail_draft_id": gmail_draft_id,
             "message": (
-                f"Draft {draft_id} saved to Gmail."
+                f"Draft {draft.id} saved to Gmail."
             ),
         }
 
@@ -307,11 +223,13 @@ class GmailActionService:
         user_id: int,
     ) -> dict[str, Any]:
         """
-        Update an existing Gmail draft.
+        Synchronize the current DB draft with Gmail.
 
-        Approval is not required for updating the Gmail draft.
+        If Gmail draft does not exist:
+            create Gmail draft.
 
-        However, sending still requires APPROVED status.
+        If Gmail draft exists:
+            update existing Gmail draft.
         """
 
         draft = self._load_draft(
@@ -319,50 +237,182 @@ class GmailActionService:
             user_id=user_id,
         )
 
-        gmail_draft_id = draft.gmail_draft_id
+        email = self._load_email(
+            email_id=draft.email_id,
+            user_id=user_id,
+        )
 
         # -----------------------------------------------------
-        # If Gmail draft does not exist, create it.
+        # No Gmail draft yet.
         # -----------------------------------------------------
 
-        if not gmail_draft_id:
+        if not draft.gmail_draft_id:
             return await self.save_draft(
                 draft_id=draft_id,
                 user_id=user_id,
             )
 
-        email = self._load_email(
-            email_id=draft.email_id,
-            user_id=user_id,
-        )
+        # -----------------------------------------------------
+        # Update existing Gmail draft.
+        # -----------------------------------------------------
 
         gmail = await self._get_gmail_service(
             user_id=user_id,
         )
 
         gmail_result = await gmail.update_draft(
-            draft_id=gmail_draft_id,
+            draft_id=draft.gmail_draft_id,
             to=email.sender,
             subject=f"Re: {email.subject}",
             body=draft.draft,
             thread_id=email.gmail_thread_id,
         )
 
+        updated_gmail_draft_id = gmail_result.get(
+            "id",
+            draft.gmail_draft_id,
+        )
+
+        draft.gmail_draft_id = updated_gmail_draft_id
+
+        self.db.commit()
+        self.db.refresh(draft)
+
         logger.info(
-            "Gmail draft %s updated by user %s.",
-            gmail_draft_id,
+            "Updated Gmail draft %s from DB draft %s.",
+            updated_gmail_draft_id,
+            draft.id,
+        )
+
+        return {
+            "success": True,
+            "draft_id": draft.id,
+            "gmail_draft_id": updated_gmail_draft_id,
+            "message": (
+                f"Draft {draft.id} updated in Gmail."
+            ),
+        }
+
+    # =========================================================
+    # SEND REPLY
+    # =========================================================
+
+    async def send_reply(
+        self,
+        draft_id: int,
+        user_id: int,
+    ) -> dict[str, Any]:
+        """
+        Send an approved Gmail draft.
+
+        Required:
+
+            draft exists
+            +
+            correct owner
+            +
+            current version
+            +
+            approval == approved
+            +
+            Gmail draft exists
+
+        After successful send:
+
+            is_sent = True
+            gmail_message_id = returned Gmail message ID
+            is_current = False
+            sent_at = now
+        """
+
+        # -----------------------------------------------------
+        # 1. Load and validate ownership.
+        # -----------------------------------------------------
+
+        draft = self._load_draft(
+            draft_id=draft_id,
+            user_id=user_id,
+        )
+
+        # -----------------------------------------------------
+        # 2. Only current draft can be sent.
+        # -----------------------------------------------------
+
+        if not draft.is_current:
+            raise ValueError(
+                f"Draft {draft_id} cannot be sent. "
+                "It is not the current draft version."
+            )
+
+        # -----------------------------------------------------
+        # 3. Approval is mandatory.
+        # -----------------------------------------------------
+
+        self._ensure_approved(
+            draft_id=draft_id,
+            user_id=user_id,
+        )
+
+        # -----------------------------------------------------
+        # 4. Gmail draft must exist.
+        # -----------------------------------------------------
+
+        if not draft.gmail_draft_id:
+            raise ValueError(
+                f"Draft {draft_id} has no Gmail draft ID. "
+                "Save draft to Gmail first."
+            )
+
+        # -----------------------------------------------------
+        # 5. Get authenticated Gmail service.
+        # -----------------------------------------------------
+
+        gmail = await self._get_gmail_service(
+            user_id=user_id,
+        )
+
+        # -----------------------------------------------------
+        # 6. Send Gmail draft.
+        # -----------------------------------------------------
+
+        send_result = await gmail.send_draft(
+            draft_id=draft.gmail_draft_id,
+        )
+
+        gmail_message_id = send_result.get(
+            "id"
+        )
+
+        if not gmail_message_id:
+            raise ValueError(
+                "Gmail did not return a message ID "
+                "after sending."
+            )
+
+        # -----------------------------------------------------
+        # 7. Update DB.
+        # -----------------------------------------------------
+
+        self._update_after_send(
+            draft=draft,
+            user_id=user_id,
+            gmail_message_id=gmail_message_id,
+        )
+
+        logger.info(
+            "Draft %s sent successfully by user %s. "
+            "Gmail message ID=%s",
+            draft_id,
             user_id,
+            gmail_message_id,
         )
 
         return {
             "success": True,
             "draft_id": draft_id,
-            "gmail_draft_id": gmail_result.get(
-                "id",
-                gmail_draft_id,
-            ),
+            "gmail_message_id": gmail_message_id,
             "message": (
-                f"Draft {draft_id} updated in Gmail."
+                f"Draft {draft_id} successfully sent."
             ),
         }
 
@@ -376,46 +426,26 @@ class GmailActionService:
         user_id: int,
     ) -> None:
         """
-        Absolute backend invariant for sending.
+        Absolute backend invariant:
 
-        Only:
-
-            approval.status == "approved"
-
-        is allowed.
-
-        Missing approval is treated as pending.
+        ONLY approved drafts can be sent.
         """
 
-        # -----------------------------------------------------
-        # First ensure the draft belongs to the user.
-        # -----------------------------------------------------
-
+        # Ensure ownership first.
         draft = self._load_draft(
             draft_id=draft_id,
             user_id=user_id,
         )
 
-        # -----------------------------------------------------
-        # Load approval.
-        # -----------------------------------------------------
-
         approval = self.approval_service.load_approval(
             draft_id=draft.id,
         )
 
-        # -----------------------------------------------------
-        # Missing approval = pending.
-        # -----------------------------------------------------
-
+        # Missing approval behaves as pending.
         if approval is None:
             status = "pending"
         else:
             status = approval.status
-
-        # -----------------------------------------------------
-        # ONLY approved is allowed.
-        # -----------------------------------------------------
 
         if status != "approved":
             raise ValueError(
@@ -431,12 +461,12 @@ class GmailActionService:
         self,
         draft: DraftReply,
         user_id: int,
+        gmail_message_id: str,
     ) -> None:
         """
-        Update database after successful Gmail send.
+        Persist successful send state.
         """
 
-        # Defense-in-depth ownership check.
         if draft.user_id != user_id:
             raise ValueError(
                 "You do not own this draft."
@@ -444,29 +474,8 @@ class GmailActionService:
 
         draft.is_sent = True
         draft.is_current = False
+        draft.gmail_message_id = gmail_message_id
+        draft.sent_at = datetime.utcnow()
 
         self.db.commit()
-
-    # =========================================================
-    # AFTER SAVE
-    # =========================================================
-
-    def _update_after_save(
-        self,
-        draft: DraftReply,
-        gmail_draft_id: str,
-        user_id: int,
-    ) -> None:
-        """
-        Store Gmail draft ID after successful Gmail creation.
-        """
-
-        # Defense-in-depth ownership check.
-        if draft.user_id != user_id:
-            raise ValueError(
-                "You do not own this draft."
-            )
-
-        draft.gmail_draft_id = gmail_draft_id
-
-        self.db.commit()
+        self.db.refresh(draft)

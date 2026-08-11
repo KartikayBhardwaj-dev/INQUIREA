@@ -18,7 +18,12 @@ class GmailService:
     ):
         self.headers = {
             "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
         }
+
+    # =========================================================
+    # EMAILS
+    # =========================================================
 
     async def list_emails(
         self,
@@ -97,6 +102,10 @@ class GmailService:
 
         return response.json()
 
+    # =========================================================
+    # CREATE GMAIL DRAFT
+    # =========================================================
+
     async def create_draft(
         self,
         to: str,
@@ -105,7 +114,11 @@ class GmailService:
         thread_id: str | None = None,
     ) -> dict[str, Any]:
 
-        message = MIMEText(body)
+        message = MIMEText(
+            body,
+            "plain",
+            "utf-8",
+        )
 
         message["to"] = to
         message["subject"] = subject
@@ -114,7 +127,7 @@ class GmailService:
             message.as_bytes()
         ).decode()
 
-        payload = {
+        payload: dict[str, Any] = {
             "message": {
                 "raw": raw,
             }
@@ -134,6 +147,10 @@ class GmailService:
 
         return response.json()
 
+    # =========================================================
+    # UPDATE GMAIL DRAFT
+    # =========================================================
+
     async def update_draft(
         self,
         draft_id: str,
@@ -143,7 +160,11 @@ class GmailService:
         thread_id: str | None = None,
     ) -> dict[str, Any]:
 
-        message = MIMEText(body)
+        message = MIMEText(
+            body,
+            "plain",
+            "utf-8",
+        )
 
         message["to"] = to
         message["subject"] = subject
@@ -152,7 +173,7 @@ class GmailService:
             message.as_bytes()
         ).decode()
 
-        payload = {
+        payload: dict[str, Any] = {
             "id": draft_id,
             "message": {
                 "raw": raw,
@@ -172,6 +193,10 @@ class GmailService:
         response.raise_for_status()
 
         return response.json()
+
+    # =========================================================
+    # SEND GMAIL DRAFT
+    # =========================================================
 
     async def send_draft(
         self,
@@ -193,6 +218,10 @@ class GmailService:
 
         return response.json()
 
+    # =========================================================
+    # BODY DECODING
+    # =========================================================
+
     @staticmethod
     def _decode_body(
         data: str | None,
@@ -203,7 +232,8 @@ class GmailService:
 
         try:
             decoded = base64.urlsafe_b64decode(
-                data + "=" * (
+                data
+                + "=" * (
                     -len(data) % 4
                 )
             )
@@ -225,33 +255,44 @@ class GmailService:
         if not payload:
             return ""
 
-        body = payload.get("body") or {}
+        body = payload.get(
+            "body"
+        ) or {}
 
-        data = body.get("data")
+        data = body.get(
+            "data"
+        )
 
         if data:
-            return cls._decode_body(data)
+            return cls._decode_body(
+                data
+            )
 
-        parts = payload.get("parts") or []
+        parts = payload.get(
+            "parts"
+        ) or []
 
         plain_text = ""
         html_text = ""
 
         for part in parts:
+
             mime_type = part.get(
                 "mimeType",
                 "",
             )
 
-            part_body = part.get(
-                "body"
-            ) or {}
+            part_body = (
+                part.get("body")
+                or {}
+            )
 
             part_data = part_body.get(
                 "data"
             )
 
             if part_data:
+
                 decoded = cls._decode_body(
                     part_data
                 )
@@ -267,6 +308,7 @@ class GmailService:
             )
 
             if nested_parts:
+
                 nested_body = cls._extract_body(
                     {
                         "parts": nested_parts
