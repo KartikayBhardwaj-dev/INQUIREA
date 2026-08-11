@@ -21,10 +21,11 @@ class InboxChatService:
     Responsibilities
     ----------------
     - Create and manage conversation sessions
-    - Load conversation memory for multi-turn context
-    - Persist user & assistant chat messages
-    - Delegate requests to ChatAgent (handling Planner, Tool Executor, and RAG execution)
-    - Return validated, structured ChatResponse schemas
+    - Load conversation memory
+    - Preserve structured action metadata
+    - Persist user and assistant messages
+    - Delegate execution to ChatAgent
+    - Return validated ChatResponse objects
     """
 
     HISTORY_LIMIT = 8
@@ -37,10 +38,20 @@ class InboxChatService:
         self,
         conversation_id: str,
         user_id: int,
-    ) -> list[dict[str, str]]:
+    ) -> list[dict[str, Any]]:
         """
-        Load the most recent conversation turns in chronological order.
+        Load recent conversation turns.
+
+        Besides the human-readable message, structured metadata is
+        returned so the planner can resolve references such as:
+
+            "it"
+            "this draft"
+            "make it shorter"
+            "approve it"
+            "send it"
         """
+
         rows = (
             self.db.query(ChatHistory)
             .filter(
@@ -60,13 +71,18 @@ class InboxChatService:
             conversation_id,
         )
 
-        return [
-            {
-                "role": row.role,
-                "message": row.message,
-            }
-            for row in rows
-        ]
+        conversation: list[dict[str, Any]] = []
+
+        for row in rows:
+            conversation.append(
+                {
+                    "role": row.role,
+                    "message": row.message,
+                    "metadata": getattr(row, "metadata", None) or {},
+                }
+            )
+
+        return conversation
 
     def _save_message(
         self,
@@ -74,16 +90,22 @@ class InboxChatService:
         user_id: int,
         role: str,
         message: str,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """
-        Persist one conversation message into database.
+        Persist one conversation message.
+
+        Metadata is optional and is primarily used for assistant
+        action/tool state.
         """
+
         self.db.add(
             ChatHistory(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 role=role,
                 message=message,
+                metadata=metadata or {},
             )
         )
 
@@ -95,37 +117,82 @@ class InboxChatService:
     ) -> ChatResponse:
         """
         Process an incoming AI Inbox Chat request.
-        
-        Orchestrates session creation, context loading, tool/RAG execution via ChatAgent,
-        and atomic database message persistence.
         """
+
         if conversation_id is None:
             conversation_id = str(uuid.uuid4())
-            logger.info("Created new conversation session: %s", conversation_id)
+
+            logger.info(
+                "Created new conversation session: %s",
+                conversation_id,
+            )
+
+        # --------------------------------------------------
+        # Load structured conversation context
+        # --------------------------------------------------
 
         conversation = self._load_conversation(
             conversation_id=conversation_id,
             user_id=user_id,
         )
 
-        # Step 1 — Delegate to ChatAgent (Planner -> Tool / RAG)
+        # --------------------------------------------------
+        # Agent execution
+        # --------------------------------------------------
+
         try:
             result: dict[str, Any] = await self.agent.chat(
                 question=question,
                 conversation=conversation,
                 user_id=user_id,
             )
+
         except Exception:
-            logger.exception("ChatAgent execution failed for conversation %s.", conversation_id)
+            logger.exception(
+                "ChatAgent execution failed for conversation %s.",
+                conversation_id,
+            )
             raise
 
-        # Step 2 — Atomically Persist Conversation Turn
+        # --------------------------------------------------
+        # Extract structured action metadata
+        # --------------------------------------------------
+
+        action_metadata = result.get("context_metadata") or {}
+
+        if not isinstance(action_metadata, dict):
+            action_metadata = {}
+
+        # Always preserve the executed tool when available.
+        if result.get("tool"):
+            action_metadata.setdefault(
+                "tool",
+                result["tool"],
+            )
+
+        # Preserve IDs from the structured tool result.
+        tool_result = result.get("tool_result")
+
+        if isinstance(tool_result, dict):
+
+            if tool_result.get("draft_id") is not None:
+                action_metadata["draft_id"] = tool_result["draft_id"]
+
+            if tool_result.get("email_id") is not None:
+                action_metadata["email_id"] = tool_result["email_id"]
+
+        # --------------------------------------------------
+        # Persist conversation turn
+        # --------------------------------------------------
+
         try:
+
             self._save_message(
                 conversation_id=conversation_id,
                 user_id=user_id,
                 role="user",
                 message=question,
+                metadata={},
             )
 
             self._save_message(
@@ -133,24 +200,44 @@ class InboxChatService:
                 user_id=user_id,
                 role="assistant",
                 message=str(result.get("answer", "")),
+                metadata=action_metadata,
             )
 
             self.db.commit()
-            logger.debug("Conversation session %s successfully committed.", conversation_id)
+
+            logger.debug(
+                "Conversation session %s successfully committed.",
+                conversation_id,
+            )
 
         except SQLAlchemyError:
             self.db.rollback()
-            logger.exception("Database transaction failed. Rolled back conversation save for %s.", conversation_id)
+
+            logger.exception(
+                "Database transaction failed. "
+                "Rolled back conversation save for %s.",
+                conversation_id,
+            )
+
             raise
 
-        # Step 3 — Construct & Return Structured Response
+        # --------------------------------------------------
+        # Construct final ChatResponse
+        # --------------------------------------------------
+
         return ChatResponse(
             conversation_id=conversation_id,
             answer=result.get("answer", ""),
             sources=result.get("sources", []),
             emails_found=result.get("emails_found", 0),
-            retrieved_emails=result.get("retrieved_emails", []),
-            query_plan=result.get("query_plan", {}),
+            retrieved_emails=result.get(
+                "retrieved_emails",
+                [],
+            ),
+            query_plan=result.get(
+                "query_plan",
+                {},
+            ),
             tool=result.get("tool"),
             tool_result=result.get("tool_result"),
         )
@@ -161,8 +248,9 @@ class InboxChatService:
         user_id: int,
     ) -> list[ChatHistory]:
         """
-        Return the complete chronological message history for a conversation.
+        Return complete chronological conversation history.
         """
+
         return (
             self.db.query(ChatHistory)
             .filter(
@@ -178,14 +266,18 @@ class InboxChatService:
         user_id: int,
     ) -> list[str]:
         """
-        Return a list of all distinct conversation IDs owned by the user.
+        Return all distinct conversation IDs owned by the user.
         """
+
         rows = (
             self.db.query(ChatHistory.conversation_id)
-            .filter(ChatHistory.user_id == user_id)
+            .filter(
+                ChatHistory.user_id == user_id,
+            )
             .distinct()
             .all()
         )
+
         return [row[0] for row in rows]
 
     def delete_conversation(
@@ -194,9 +286,11 @@ class InboxChatService:
         user_id: int,
     ) -> None:
         """
-        Delete an entire conversation history session for a given user.
+        Delete an entire conversation history session.
         """
+
         try:
+
             (
                 self.db.query(ChatHistory)
                 .filter(
@@ -205,10 +299,21 @@ class InboxChatService:
                 )
                 .delete()
             )
+
             self.db.commit()
-            logger.info("Successfully deleted conversation session: %s", conversation_id)
+
+            logger.info(
+                "Successfully deleted conversation session: %s",
+                conversation_id,
+            )
 
         except SQLAlchemyError:
             self.db.rollback()
-            logger.exception("Failed to delete conversation session %s. Transaction rolled back.", conversation_id)
+
+            logger.exception(
+                "Failed to delete conversation session %s. "
+                "Transaction rolled back.",
+                conversation_id,
+            )
+
             raise

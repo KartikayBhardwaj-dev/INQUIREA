@@ -6,9 +6,9 @@ from uuid import uuid4
 from sqlalchemy import CheckConstraint
 from sqlalchemy import DateTime
 from sqlalchemy import ForeignKey
+from sqlalchemy import JSON
 from sqlalchemy import String
 from sqlalchemy import Text
-
 from sqlalchemy.orm import Mapped
 from sqlalchemy.orm import mapped_column
 
@@ -26,6 +26,7 @@ class ChatHistory(Base):
     - conversation persistence
     - follow-up questions
     - conversation memory
+    - structured tool/action context
     """
 
     __tablename__ = "chat_history"
@@ -83,6 +84,35 @@ class ChatHistory(Base):
         Text,
         nullable=False,
     )
+
+    # ---------------------------------------------------------
+    # Structured Message Metadata
+    # ---------------------------------------------------------
+
+    message_metadata: Mapped[dict | None] = mapped_column(
+        "metadata",
+        JSON,
+        nullable=True,
+        default=None,
+    )
+
+    # Example:
+    #
+    # {
+    #     "tool": "generate_reply",
+    #     "draft_id": 15,
+    #     "email_id": 10,
+    #     "tool_result": {
+    #         "draft_id": 15,
+    #         "email_id": 10,
+    #         "draft": "Hi Google Team...",
+    #         "version": 1,
+    #         "tone": "professional",
+    #         "approval_status": "pending",
+    #         "gmail_draft_id": "abc123",
+    #         "is_sent": false
+    #     }
+    # }
 
     # ---------------------------------------------------------
     # Timestamp

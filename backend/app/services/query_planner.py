@@ -23,112 +23,63 @@ class QueryPlan(BaseModel):
         "sender_lookup",
         "deadline_search",
         "metadata_search",
-    ] = Field(
-        description="Overall intent of the user's request."
-    )
+    ]
 
-    semantic_query: str | None = Field(
-        default=None,
-        description=(
-            "Optimized semantic search query. "
-            "Rewrite vague user questions into better search phrases."
-        ),
-    )
+    semantic_query: str | None = None
 
-    category: str | None = Field(
-        default=None,
-        description="Email category filter.",
-    )
+    category: str | None = None
 
     priority: Literal[
         "low",
         "medium",
         "high",
         "urgent",
-    ] | None = Field(
-        default=None,
-        description="Priority filter.",
-    )
+    ] | None = None
 
-    sender: str | None = Field(
-        default=None,
-        description="Specific sender if requested.",
-    )
+    sender: str | None = None
 
-    requires_reply: bool | None = Field(
-        default=None,
-        description=(
-            "Whether only emails requiring a reply "
-            "should be returned."
-        ),
-    )
+    requires_reply: bool | None = None
 
     retrieve_limit: int = Field(
         default=5,
         ge=1,
         le=50,
-        description="Maximum number of emails to retrieve.",
     )
 
     sort_by: Literal[
         "relevance",
         "date",
         "priority",
-    ] = Field(
-        default="relevance",
-        description="Sorting strategy.",
-    )
+    ] = "relevance"
 
-    date_from: str | None = Field(
-        default=None,
-        description="Inclusive ISO date lower bound.",
-    )
+    date_from: str | None = None
+    date_to: str | None = None
 
-    date_to: str | None = Field(
-        default=None,
-        description="Inclusive ISO date upper bound.",
-    )
+    reasoning: str = ""
 
-    reasoning: str = Field(
-        default="",
-        description="Short explanation of the planning decision.",
-    )
+    needs_tool: bool = False
 
-    needs_tool: bool = Field(
-        default=False,
-        description="Whether this request should execute a Level 2 tool.",
-    )
-
-    tool_name: str | None = Field(
-        default=None,
-        description="Registered tool name to execute.",
-    )
+    tool_name: str | None = None
 
     tool_arguments: dict[str, Any] = Field(
         default_factory=dict,
-        description="Arguments passed to the selected tool.",
     )
 
-    needs_clarification: bool = Field(
-        default=False,
-        description="Whether the request needs clarification.",
-    )
+    needs_clarification: bool = False
 
-    clarification_message: str | None = Field(
-        default=None,
-        description="Message explaining what information is missing.",
-    )
+    clarification_message: str | None = None
 
 
 class QueryPlanner:
 
     def __init__(self):
+
         self.parser = PydanticOutputParser(
             pydantic_object=QueryPlan
         )
 
         categories_list = ", ".join(
-            [c.value for c in EmailCategory]
+            c.value for c in EmailCategory
         )
 
         self.prompt = ChatPromptTemplate.from_messages(
@@ -141,10 +92,11 @@ You are the Retrieval Planning Engine for INQUIREA.
 Your ONLY responsibility is to transform the user's request
 into a structured QueryPlan.
 
-You NEVER answer the user's question.
+You NEVER answer the user.
 You NEVER summarize emails.
 You NEVER invent IDs.
-You ONLY return valid JSON matching the QueryPlan schema.
+
+Return ONLY valid JSON matching QueryPlan.
 
 ========================================================
 AVAILABLE INTENTS
@@ -156,41 +108,50 @@ AVAILABLE INTENTS
 4. sender_lookup
 5. deadline_search
 
-Choose exactly ONE intent.
+Choose exactly ONE.
 
 ========================================================
-CONVERSATIONAL CONTEXT
+STRUCTURED CONVERSATION CONTEXT
 ========================================================
 
-Use conversation history to resolve references such as:
+Conversation history may contain structured metadata.
 
-- "it"
-- "this draft"
-- "that email"
-- "make it shorter"
-- "make it professional"
-- "make it friendlier"
-- "change the ending"
-- "regenerate it"
-- "approve it"
-- "send it"
+Example:
 
-If the current request depends on a previous draft,
-find the draft_id from conversation history.
+{{
+    "role": "assistant",
+    "message": "Draft generated.",
+    "metadata": {{
+        "tool": "generate_reply",
+        "draft_id": 15,
+        "email_id": 10
+    }}
+}}
 
-If the current request contains an explicit ID,
-ALWAYS prefer the current request's ID.
+Use this structured metadata to resolve:
 
-NEVER invent an ID.
+- it
+- this draft
+- that draft
+- this email
+- make it shorter
+- make it professional
+- make it friendlier
+- approve it
+- reject it
+- save it
+- send it
+
+NEVER invent IDs.
+
+If an explicit ID is present in the current user request,
+prefer that ID.
+
+Otherwise use the most recent relevant structured metadata.
 
 ========================================================
-LEVEL 2 TOOL ROUTING
+LEVEL 2 TOOLS
 ========================================================
-
-If the user wants an ACTION rather than information,
-set:
-
-needs_tool = true
 
 Available tools:
 
@@ -205,402 +166,226 @@ Available tools:
 - update_draft
 - send_reply
 
+Use a tool when the user wants an ACTION.
+
 ========================================================
 GENERATE REPLY
 ========================================================
 
-Example:
+"Generate a reply to email 10"
 
-User:
-Generate a reply to email 10.
-
-Output:
-
-needs_tool = true
-tool_name = "generate_reply"
-
-tool_arguments = {{
-    "email_id": 10,
-    "tone": "professional"
+{{
+    "needs_tool": true,
+    "tool_name": "generate_reply",
+    "tool_arguments": {{
+        "email_id": 10,
+        "tone": "professional"
+    }}
 }}
 
 ========================================================
 REWRITE REPLY
 ========================================================
 
-IMPORTANT:
+rewrite_reply requires:
 
-rewrite_reply MUST use:
+- draft_id
+- instruction
 
-draft_id
-
-and an instruction.
-
-The instruction is NOT limited to tone.
-
-Use:
-
-"instruction"
-
-for requests such as:
-
-- make it shorter
-- make it concise
-- make it more professional
-- make it friendly
-- make it friendlier
-- change the ending
-- remove unnecessary details
-- make it clearer
-- simplify this
-- make it more formal
-- make it less formal
+The instruction is NOT the same thing as tone.
 
 Examples:
 
-User:
-Make draft 15 shorter.
+"Make it shorter"
 
-Output:
-
-needs_tool = true
-tool_name = "rewrite_reply"
-
-tool_arguments = {{
+{{
     "draft_id": 15,
     "instruction": "make it shorter"
 }}
 
-User:
-Make draft 15 more professional.
+"Make it more professional"
 
-Output:
-
-needs_tool = true
-tool_name = "rewrite_reply"
-
-tool_arguments = {{
+{{
     "draft_id": 15,
     "instruction": "make it more professional"
 }}
 
-User:
-Change the ending.
+"Change the ending"
 
-If conversation history identifies draft 15:
-
-needs_tool = true
-tool_name = "rewrite_reply"
-
-tool_arguments = {{
+{{
     "draft_id": 15,
     "instruction": "change the ending"
 }}
 
-User:
-Make it friendlier.
+"Remove unnecessary details"
 
-If conversation history identifies draft 15:
-
-needs_tool = true
-tool_name = "rewrite_reply"
-
-tool_arguments = {{
+{{
     "draft_id": 15,
-    "instruction": "make it friendlier"
+    "instruction": "remove unnecessary details"
 }}
-
-========================================================
-REWRITE INSTRUCTION RULE
-========================================================
-
-For rewrite_reply:
-
-- Always include draft_id.
-- Always include instruction.
-- Preserve the user's intended instruction.
-- Do NOT convert every instruction into a tone.
-- "shorter" is an instruction.
-- "more professional" is an instruction.
-- "change the ending" is an instruction.
-- "remove unnecessary details" is an instruction.
-
-The instruction should be a concise normalized version
-of the user's request.
 
 ========================================================
 EDIT DRAFT
 ========================================================
 
-Use edit_draft only when the user explicitly provides
-the replacement draft content.
+Only use edit_draft when the user explicitly supplies
+replacement content.
 
-Example:
+It requires:
 
-User:
-Replace the draft with:
-Hi Google Team,
-
-Thanks for reaching out.
-
-Best,
-Kartikay
-
-Output:
-
-needs_tool = true
-tool_name = "edit_draft"
-
-tool_arguments = {{
-    "draft_id": <draft_id>,
-    "content": "Hi Google Team,\\n\\nThanks for reaching out.\\n\\nBest,\\nKartikay"
-}}
-
-The draft_id may come from conversation history.
+draft_id
+content
 
 ========================================================
 APPROVE
 ========================================================
 
-User:
-Approve draft 15.
+"Approve draft 15"
 
-Output:
-
-needs_tool = true
-tool_name = "approve_draft"
-
-tool_arguments = {{
+{{
     "draft_id": 15
 }}
 
-User:
-Approve it.
+"Approve it"
 
-If conversation history identifies draft 15:
-
-tool_name = "approve_draft"
-
-tool_arguments = {{
-    "draft_id": 15
-}}
+Use the draft_id from structured conversation metadata.
 
 ========================================================
 REJECT
 ========================================================
 
-User:
-Reject draft 15.
+"Reject draft 15"
 
-Output:
+{{
+    "draft_id": 15
+}}
 
-needs_tool = true
-tool_name = "reject_draft"
+"Reject it"
 
-tool_arguments = {{
+Use the draft_id from structured conversation metadata.
+
+========================================================
+SAVE
+========================================================
+
+"Save draft 15"
+
+{{
+    "draft_id": 15
+}}
+
+"Save it"
+
+Use structured conversation metadata.
+
+========================================================
+UPDATE
+========================================================
+
+"Update draft 15"
+
+{{
     "draft_id": 15
 }}
 
 ========================================================
-SAVE DRAFT
+SEND
 ========================================================
 
-User:
-Save draft 15 to Gmail.
+"Send draft 15"
 
-Output:
-
-needs_tool = true
-tool_name = "save_draft"
-
-tool_arguments = {{
+{{
     "draft_id": 15
 }}
 
-========================================================
-UPDATE DRAFT
-========================================================
+"Send it"
 
-User:
-Update draft 15.
-
-Output:
-
-needs_tool = true
-tool_name = "update_draft"
-
-tool_arguments = {{
-    "draft_id": 15
-}}
+Use structured conversation metadata.
 
 ========================================================
-SEND REPLY
+ID RULE
 ========================================================
 
-User:
-Send draft 15.
+Priority:
 
-Output:
+1. Current user message
+2. Structured conversation metadata
+3. No ID
 
-needs_tool = true
-tool_name = "send_reply"
+If no ID can be resolved:
 
-tool_arguments = {{
-    "draft_id": 15
-}}
-
-User:
-Send it.
-
-If conversation history identifies draft 15:
-
-tool_name = "send_reply"
-
-tool_arguments = {{
-    "draft_id": 15
-}}
-
-========================================================
-ID RULES
-========================================================
-
-NEVER invent email_id.
-NEVER invent draft_id.
-
-Priority 1:
-Use an ID explicitly mentioned in the CURRENT USER QUESTION.
-
-Priority 2:
-Use an ID from conversation history.
-
-If neither exists:
-
-tool_arguments = {{}}
 needs_clarification = true
 
-Do NOT execute the tool.
+Do not invent an ID.
 
 ========================================================
-TONE
+GENERATE REPLY TONE
 ========================================================
 
-Tone is optional metadata.
+generate_reply defaults to:
 
-For generate_reply:
-default tone = "professional"
+"professional"
 
-For rewrite_reply:
-DO NOT add a tone field unless the instruction itself
-is specifically a tone request.
+========================================================
+REWRITE INSTRUCTION
+========================================================
 
-The primary rewrite field is:
+rewrite_reply MUST contain:
 
 "instruction"
 
+Do not reduce instructions to a tone.
+
 Examples:
 
-"Make it shorter"
--> instruction = "make it shorter"
-
-"Make it more professional"
--> instruction = "make it more professional"
-
-"Make it friendly"
--> instruction = "make it friendly"
-
-"Change the ending"
--> instruction = "change the ending"
-
-========================================================
-SEMANTIC SEARCH
-========================================================
-
-If the request is information retrieval rather than an action,
-do not use a tool.
-
-Use the retrieval fields normally.
-
-========================================================
-DATE RULES
-========================================================
-
-If a date phrase appears inside a contextual search target
-such as:
-
-"July 31 interview"
-"assignment due Friday"
-
-keep it inside semantic_query.
-
-Only use date_from/date_to when the user explicitly requests
-date filtering such as:
-
-- received after
-- received before
-- sent yesterday
-- received this week
+"make it shorter"
+"make it professional"
+"make it friendlier"
+"change the ending"
+"remove unnecessary details"
+"make it concise"
 
 ========================================================
 CATEGORY
 ========================================================
 
-Populate category ONLY if it explicitly matches one of:
+Valid categories:
 
 {categories_list}
 
-Otherwise use null.
-
 ========================================================
-PRIORITY
+RETRIEVAL
 ========================================================
 
-Map:
+Default limit = 5.
 
-low
-medium
-high
-urgent
+Summarize = 20.
 
-Otherwise use null.
+Sender/deadline = 10.
 
-========================================================
-RETRIEVAL LIMIT
-========================================================
+Maximum = 50.
 
-Default:
-5
+Default sort = relevance.
 
-Sender/deadline:
-10
+Latest/recent = date.
 
-Summarize:
-20
-
-Maximum:
-50
+Highest priority = priority.
 
 ========================================================
-SORTING
+DATE RULE
 ========================================================
 
-Default:
-relevance
+Only use date_from/date_to for explicit date filters.
 
-latest/recent:
-date
-
-highest priority:
-priority
+Keep contextual dates inside semantic_query.
 
 ========================================================
-IMPORTANT OUTPUT RULES
+OUTPUT
 ========================================================
 
 Return ONLY valid JSON.
 
-Do NOT create nested objects outside tool_arguments.
-
-Do NOT create fields that are not defined by QueryPlan.
+Do not create fields outside QueryPlan.
 
 tool_arguments must always be an object.
 
@@ -621,23 +406,148 @@ format_instructions
             ]
         )
 
+    # ------------------------------------------------------
+    # Structured context extraction
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _get_context_ids(
+        conversation: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+
+        context: dict[str, Any] = {}
+
+        for message in reversed(conversation):
+
+            metadata = message.get("metadata")
+
+            if not isinstance(metadata, dict):
+                continue
+
+            if (
+                "draft_id" not in context
+                and metadata.get("draft_id") is not None
+            ):
+                context["draft_id"] = metadata["draft_id"]
+
+            if (
+                "email_id" not in context
+                and metadata.get("email_id") is not None
+            ):
+                context["email_id"] = metadata["email_id"]
+
+            if (
+                "tool" not in context
+                and metadata.get("tool")
+            ):
+                context["tool"] = metadata["tool"]
+
+            # We have enough context.
+            if (
+                "draft_id" in context
+                and "email_id" in context
+                and "tool" in context
+            ):
+                break
+
+        return context
+
+    # ------------------------------------------------------
+    # Explicit ID extraction
+    # ------------------------------------------------------
+
+    @staticmethod
+    def _extract_explicit_ids(
+        question: str,
+    ) -> dict[str, int]:
+
+        ids: dict[str, int] = {}
+
+        draft_match = re.search(
+            r"\bdraft(?:_reply_id)?\s*(?:#|id)?\s*(\d+)",
+            question,
+            re.IGNORECASE,
+        )
+
+        email_match = re.search(
+            r"\bemail\s*(?:#|id)?\s*(\d+)",
+            question,
+            re.IGNORECASE,
+        )
+
+        if draft_match:
+            ids["draft_id"] = int(
+                draft_match.group(1)
+            )
+
+        if email_match:
+            ids["email_id"] = int(
+                email_match.group(1)
+            )
+
+        return ids
+
+    # ------------------------------------------------------
+    # Plan
+    # ------------------------------------------------------
+
     async def plan(
         self,
         question: str,
-        conversation: list[dict] | None = None,
+        conversation: list[dict[str, Any]] | None = None,
     ) -> QueryPlan:
 
-        history_str = "No previous conversation history."
+        conversation = conversation or []
+
+        context = self._get_context_ids(
+            conversation
+        )
+
+        explicit_ids = self._extract_explicit_ids(
+            question
+        )
+
+        history_str = (
+            "No previous conversation history."
+        )
 
         if conversation:
-            history_str = "\n".join(
-                [
-                    (
-                        f"{m.get('role', 'user').capitalize()}: "
-                        f"{m.get('message', m.get('content', ''))}"
+
+            history_parts = []
+
+            for message in conversation:
+
+                role = message.get(
+                    "role",
+                    "user",
+                )
+
+                content = message.get(
+                    "message",
+                    message.get(
+                        "content",
+                        "",
+                    ),
+                )
+
+                metadata = message.get(
+                    "metadata",
+                    {},
+                )
+
+                history_parts.append(
+                    f"{str(role).capitalize()}: "
+                    f"{content}"
+                )
+
+                if metadata:
+                    history_parts.append(
+                        "Structured metadata: "
+                        f"{metadata}"
                     )
-                    for m in conversation
-                ]
+
+            history_str = "\n".join(
+                history_parts
             )
 
         llm_instance = get_llm()
@@ -653,6 +563,7 @@ format_instructions
         )
 
         try:
+
             plan: QueryPlan = await chain.ainvoke(
                 {
                     "question": question,
@@ -661,36 +572,31 @@ format_instructions
             )
 
         except Exception:
+
             logger.exception(
-                "Failed to parse QueryPlan from LLM response."
+                "Failed to parse QueryPlan."
             )
 
             return QueryPlan(
                 intent="semantic_search",
                 semantic_query=question,
-                category=None,
-                priority=None,
-                sender=None,
-                requires_reply=None,
-                retrieve_limit=5,
-                sort_by="relevance",
-                date_from=None,
-                date_to=None,
-                needs_tool=False,
-                tool_name=None,
-                tool_arguments={},
                 reasoning=(
                     "Fallback retrieval plan generated "
                     "after planner failure."
                 ),
             )
 
-        # --------------------------------------------------
-        # Normalize basic fields
-        # --------------------------------------------------
+        plan.reasoning = (
+            plan.reasoning or ""
+        )
 
-        plan.reasoning = plan.reasoning or ""
-        plan.tool_arguments = plan.tool_arguments or {}
+        plan.tool_arguments = (
+            plan.tool_arguments or {}
+        )
+
+        # --------------------------------------------------
+        # Normalize semantic fields
+        # --------------------------------------------------
 
         if not plan.semantic_query:
             plan.semantic_query = question
@@ -700,6 +606,7 @@ format_instructions
             )
 
         if plan.priority:
+
             plan.priority = (
                 plan.priority.lower().strip()
             )
@@ -713,12 +620,14 @@ format_instructions
                 plan.priority = None
 
         if plan.category:
+
             plan.category = (
                 plan.category.strip().lower()
             )
 
             if plan.category not in [
-                c.value for c in EmailCategory
+                c.value
+                for c in EmailCategory
             ]:
                 plan.category = None
 
@@ -726,14 +635,21 @@ format_instructions
             plan.sender = plan.sender.strip()
 
         if plan.date_from:
-            plan.date_from = plan.date_from.strip()
+            plan.date_from = (
+                plan.date_from.strip()
+            )
 
         if plan.date_to:
-            plan.date_to = plan.date_to.strip()
+            plan.date_to = (
+                plan.date_to.strip()
+            )
 
         plan.retrieve_limit = max(
             1,
-            min(plan.retrieve_limit, 50),
+            min(
+                plan.retrieve_limit,
+                50,
+            ),
         )
 
         if plan.sort_by not in {
@@ -756,7 +672,7 @@ format_instructions
             plan.sort_by = "date"
 
         # --------------------------------------------------
-        # Normalize tool name
+        # Normalize tool
         # --------------------------------------------------
 
         valid_tools = {
@@ -773,27 +689,66 @@ format_instructions
         }
 
         if plan.tool_name:
+
             plan.tool_name = (
                 plan.tool_name.strip().lower()
             )
 
         if plan.tool_name not in valid_tools:
+
             if plan.needs_tool:
+
                 plan.needs_tool = False
                 plan.tool_name = None
                 plan.tool_arguments = {}
 
         # --------------------------------------------------
-        # Normalize IDs
+        # Deterministically resolve IDs
         # --------------------------------------------------
 
-        for key in ("email_id", "draft_id"):
-            value = plan.tool_arguments.get(key)
+        # Current user IDs always win.
+        for key, value in explicit_ids.items():
+
+            plan.tool_arguments[key] = value
+
+        # If current message did not contain an ID,
+        # recover it from structured conversation metadata.
+        if (
+            "draft_id"
+            not in plan.tool_arguments
+            and context.get("draft_id") is not None
+        ):
+            plan.tool_arguments["draft_id"] = (
+                context["draft_id"]
+            )
+
+        if (
+            "email_id"
+            not in plan.tool_arguments
+            and context.get("email_id") is not None
+        ):
+            plan.tool_arguments["email_id"] = (
+                context["email_id"]
+            )
+
+        # --------------------------------------------------
+        # Normalize ID types
+        # --------------------------------------------------
+
+        for key in (
+            "email_id",
+            "draft_id",
+        ):
+
+            value = plan.tool_arguments.get(
+                key
+            )
 
             if isinstance(value, int):
                 continue
 
             if isinstance(value, str):
+
                 match = re.search(
                     r"\d+",
                     value,
@@ -805,21 +760,98 @@ format_instructions
                     )
 
         # --------------------------------------------------
+        # Infer rewrite instruction
+        # --------------------------------------------------
+
+        if plan.tool_name == "rewrite_reply":
+
+            instruction = (
+                plan.tool_arguments.get(
+                    "instruction"
+                )
+            )
+
+            if instruction is None:
+
+                # Recover instruction from current user
+                # request when the LLM omitted it.
+                normalized_question = (
+                    question.strip()
+                )
+
+                if normalized_question:
+                    plan.tool_arguments[
+                        "instruction"
+                    ] = normalized_question
+
+            else:
+
+                instruction = str(
+                    instruction
+                ).strip()
+
+                if instruction:
+
+                    plan.tool_arguments[
+                        "instruction"
+                    ] = instruction
+
+                else:
+
+                    plan.tool_arguments[
+                        "instruction"
+                    ] = question.strip()
+
+        # --------------------------------------------------
+        # Generate reply default tone
+        # --------------------------------------------------
+
+        if plan.tool_name == "generate_reply":
+
+            plan.tool_arguments.setdefault(
+                "tone",
+                "professional",
+            )
+
+        # --------------------------------------------------
         # Required arguments
         # --------------------------------------------------
 
         required_tool_arguments = {
-            "send_reply": ["draft_id"],
-            "update_draft": ["draft_id"],
-            "save_draft": ["draft_id"],
-            "approve_draft": ["draft_id"],
-            "reject_draft": ["draft_id"],
-            "get_email": ["email_id"],
-            "generate_reply": ["email_id"],
+
+            "send_reply": [
+                "draft_id",
+            ],
+
+            "update_draft": [
+                "draft_id",
+            ],
+
+            "save_draft": [
+                "draft_id",
+            ],
+
+            "approve_draft": [
+                "draft_id",
+            ],
+
+            "reject_draft": [
+                "draft_id",
+            ],
+
+            "get_email": [
+                "email_id",
+            ],
+
+            "generate_reply": [
+                "email_id",
+            ],
+
             "rewrite_reply": [
                 "draft_id",
                 "instruction",
             ],
+
             "edit_draft": [
                 "draft_id",
                 "content",
@@ -827,88 +859,71 @@ format_instructions
         }
 
         # --------------------------------------------------
-        # Tool-specific normalization
-        # --------------------------------------------------
-
-        if plan.tool_name == "generate_reply":
-            plan.tool_arguments.setdefault(
-                "tone",
-                "professional",
-            )
-
-        if plan.tool_name == "rewrite_reply":
-
-            instruction = plan.tool_arguments.get(
-                "instruction"
-            )
-
-            if instruction is not None:
-                instruction = str(
-                    instruction
-                ).strip()
-
-                if instruction:
-                    plan.tool_arguments[
-                        "instruction"
-                    ] = instruction
-                else:
-                    plan.tool_arguments.pop(
-                        "instruction",
-                        None,
-                    )
-
-        # --------------------------------------------------
-        # Validate required arguments
+        # Validate tool
         # --------------------------------------------------
 
         if plan.needs_tool:
 
-            required = required_tool_arguments.get(
-                plan.tool_name,
-                [],
+            required = (
+                required_tool_arguments.get(
+                    plan.tool_name,
+                    [],
+                )
             )
 
-            missing = [
-                argument
-                for argument in required
-                if (
-                    plan.tool_arguments.get(argument)
-                    is None
-                    or (
-                        isinstance(
-                            plan.tool_arguments.get(argument),
-                            str,
-                        )
-                        and not plan.tool_arguments.get(
-                            argument
-                        ).strip()
+            missing = []
+
+            for argument in required:
+
+                value = (
+                    plan.tool_arguments.get(
+                        argument
                     )
                 )
-            ]
+
+                if value is None:
+                    missing.append(argument)
+                    continue
+
+                if (
+                    isinstance(value, str)
+                    and not value.strip()
+                ):
+                    missing.append(argument)
 
             if missing:
 
                 plan.needs_clarification = True
 
-                if plan.tool_name == "rewrite_reply":
+                if (
+                    plan.tool_name
+                    == "rewrite_reply"
+                ):
+
                     plan.clarification_message = (
-                        "I need the draft you want to "
-                        "rewrite and the rewrite instruction."
+                        "I need a draft ID to rewrite. "
+                        "Please specify the draft."
                     )
 
-                elif plan.tool_name == "edit_draft":
+                elif (
+                    plan.tool_name
+                    == "edit_draft"
+                ):
+
                     plan.clarification_message = (
-                        "I need the draft ID and the "
-                        "new draft content."
+                        "I need the draft ID and "
+                        "the new draft content."
                     )
 
                 else:
+
                     plan.clarification_message = (
-                        f"Missing required information: "
-                        f"{', '.join(missing)}."
+                        "Missing required information: "
+                        + ", ".join(missing)
+                        + "."
                     )
 
-                # Do NOT execute incomplete tool calls.
+                # Do not execute incomplete tool calls.
                 plan.needs_tool = False
                 plan.tool_name = None
                 plan.tool_arguments = {}
