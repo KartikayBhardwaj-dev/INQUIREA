@@ -187,32 +187,127 @@ class DraftService:
     # =========================================================
 
     async def rewrite_draft(
-        self,
-        draft_id: int,
-        tone: str = "professional",
-        user_id: int | None = None,
-    ) -> DraftReply:
+    self,
+    draft_id: int,
+    tone: str = "professional",
+    instruction: str | None = None,
+    user_id: int | None = None,
+) -> DraftReply:
 
         user_id = self._require_user(user_id)
 
+    # ---------------------------------------------------------
+    # Load existing draft and verify ownership.
+    # ---------------------------------------------------------
+
         draft = self.load_draft(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
+        draft_id=draft_id,
+        user_id=user_id,
+    )
 
         if draft is None:
             raise ValueError(
-                f"Draft with ID {draft_id} not found."
-            )
-
-        # generate_draft() will again verify that
-        # the email belongs to this same user.
-
-        return await self.generate_draft(
-            email_id=draft.email_id,
-            tone=tone,
-            user_id=user_id,
+            f"Draft with ID {draft_id} not found."
         )
+
+        if instruction is None or not instruction.strip():
+            raise ValueError(
+            "Rewrite instruction is required."
+        )
+
+    # ---------------------------------------------------------
+    # Verify associated email belongs to the same user.
+    # ---------------------------------------------------------
+
+        email = self._load_email(
+        email_id=draft.email_id,
+        user_id=user_id,
+    )
+
+        if email is None:
+            raise ValueError(
+            f"Email with ID {draft.email_id} not found "
+            f"for user {user_id}."
+        )
+
+    # ---------------------------------------------------------
+    # Ask the reply agent to rewrite the CURRENT draft.
+    #
+    # Important:
+    # We pass the existing draft content rather than
+    # generating a completely unrelated reply from the email.
+    # ---------------------------------------------------------
+
+        state = {
+        "subject": email.subject,
+        "body": email.body or "",
+        "summary": "",
+        "tone": tone,
+        "draft_reply": draft.draft,
+        "instruction": instruction.strip(),
+    }
+
+        agent_result: dict[str, Any] = (
+        await self.reply_agent.execute(state)
+    )
+
+        rewritten_content = (
+        agent_result.get("draft_reply", "")
+    )
+
+        if not rewritten_content:
+            raise ValueError(
+            "Reply agent did not generate rewritten content."
+        )
+
+    # ---------------------------------------------------------
+    # IMPORTANT:
+    #
+    # Do NOT overwrite the existing draft.
+    #
+    # Create a completely new DraftReply version.
+    # Repository should:
+    #
+    #   old draft -> is_current=False
+    #   new draft -> version=N+1
+    #   new draft -> is_current=True
+    # ---------------------------------------------------------
+
+        new_draft = self.repository.create_draft(
+        email_id=draft.email_id,
+        content=rewritten_content,
+        user_id=user_id,
+        tone=tone,
+    )
+
+    # ---------------------------------------------------------
+    # Every rewritten version requires fresh approval.
+    # ---------------------------------------------------------
+
+        approval = self.approval_service.reset_to_pending(
+        draft_id=new_draft.id,
+        user_id=user_id,
+        commit=False,
+    )
+
+        self.db.commit()
+
+        self.db.refresh(new_draft)
+        self.db.refresh(approval)
+
+        logger.info(
+        "Rewrote Draft ID %s into new Draft ID %s "
+        "Version %s for User ID %s. "
+        "Instruction=%s Approval=%s.",
+        draft.id,
+        new_draft.id,
+        new_draft.version,
+        user_id,
+        instruction,
+        approval.status,
+    )
+
+        return new_draft
 
     # =========================================================
     # REGENERATE
