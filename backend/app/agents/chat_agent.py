@@ -88,16 +88,15 @@ class ChatAgent:
             )
 
             return {
-                "answer": (
-                    "I ran into an issue planning "
-                    "your request. Please try "
-                    "rephrasing your question."
-                ),
-                "sources": [],
-                "emails_found": 0,
-                "retrieved_emails": [],
-                "query_plan": {},
-            }
+    "answer": (
+        "I ran into an issue planning "
+        "your request. Please try "
+        "rephrasing your question."
+    ),
+    "tool": None,
+    "tool_result": None,
+    "query_plan": {},
+}
 
         logger.info(
             "Query plan generated: %s",
@@ -111,16 +110,15 @@ class ChatAgent:
         if plan.needs_clarification:
 
             return {
-                "answer": (
-                    plan.clarification_message
-                    or "I need some more information "
-                    "to complete that action."
-                ),
-                "sources": [],
-                "emails_found": 0,
-                "retrieved_emails": [],
-                "query_plan": plan.model_dump(),
-            }
+    "answer": (
+        plan.clarification_message
+        or "I need some more information "
+        "to complete that action."
+    ),
+    "tool": None,
+    "tool_result": None,
+    "query_plan": plan.model_dump(),
+}
 
         # --------------------------------------------------
         # Tool execution
@@ -147,207 +145,326 @@ class ChatAgent:
         )
 
     async def _handle_tool_request(
-        self,
-        plan: QueryPlan,
-        user_id: int | None = None,
-    ) -> dict[str, Any]:
+    self,
+    plan: QueryPlan,
+    user_id: int | None = None,
+) -> dict[str, Any]:
 
         logger.info(
-            "Planner selected tool '%s'.",
+        "Planner selected tool '%s'.",
+        plan.tool_name,
+    )
+
+    # --------------------------------------------------
+    # Build tool arguments
+    # --------------------------------------------------
+
+        tool_args = {
+        **plan.tool_arguments
+    }
+
+    # user_id is injected by backend.
+    # Planner must never control authentication identity.
+        if user_id is not None:
+            tool_args["user_id"] = user_id
+
+    # --------------------------------------------------
+    # Execute tool
+    # --------------------------------------------------
+
+        try:
+
+            tool_result = await self.tool_executor.execute(
+            tool_name=plan.tool_name,
+            **tool_args,
+        )
+
+        except Exception as exc:
+
+            logger.exception(
+            "Tool '%s' execution failed.",
             plan.tool_name,
         )
 
-        # Copy planner arguments.
-        tool_args = {
-            **plan.tool_arguments
+            error_message = str(exc)
+
+            return {
+            "answer": error_message,
+            "tool": plan.tool_name,
+            "tool_result": None,
+            "error": self._build_tool_error(
+                message=error_message,
+                tool_name=plan.tool_name,
+            ),
+            "query_plan": plan.model_dump(),
         }
 
-        # user_id is injected here.
-        # The planner never needs to provide it.
-        if user_id is not None:
-
-            tool_args["user_id"] = user_id
-
-        tool_result = (
-            await self.tool_executor.execute(
-                tool_name=plan.tool_name,
-                **tool_args,
-            )
-        )
-
-        # --------------------------------------------------
-        # Tool failed
-        # --------------------------------------------------
+    # --------------------------------------------------
+    # Tool returned an explicit failure
+    # --------------------------------------------------
 
         if not tool_result.get("success"):
 
-            return {
-                "answer": (
-                    tool_result.get(
-                        "error",
-                        "An unknown tool error occurred.",
-                    )
-                ),
-                "tool": plan.tool_name,
-                "tool_result": None,
-                "context_metadata": {
-                    "tool": plan.tool_name,
-                },
-                "sources": [],
-                "emails_found": 0,
-                "retrieved_emails": [],
-                "query_plan": plan.model_dump(),
-            }
-
-        # --------------------------------------------------
-        # Normalize tool result
-        # --------------------------------------------------
-
-        result = tool_result.get(
-            "result",
-            {},
+            error_message = tool_result.get(
+            "error",
+            "An unknown tool error occurred.",
         )
 
-        if isinstance(result, str):
+        # Handle either:
+        #
+        # error = "some message"
+        #
+        # or:
+        #
+        # error = {
+        #     "code": "...",
+        #     "message": "..."
+        # }
+        #
 
-            answer = result
+            if isinstance(error_message, dict):
 
-            structured_result = {
-                "details": result
+                error = {
+                "code": error_message.get(
+                    "code",
+                    "TOOL_ERROR",
+                ),
+                "message": error_message.get(
+                    "message",
+                    "An unknown tool error occurred.",
+                ),
             }
 
-        elif isinstance(result, dict):
+            else:
+
+                error = self._build_tool_error(
+                message=str(error_message),
+                tool_name=plan.tool_name,
+            )
+
+            return {
+            "answer": error["message"],
+            "tool": plan.tool_name,
+            "tool_result": None,
+            "error": error,
+            "query_plan": plan.model_dump(),
+        }
+
+    # --------------------------------------------------
+    # Extract actual tool result
+    # --------------------------------------------------
+
+        result = tool_result.get(
+        "result",
+        {},
+    )
+
+    # --------------------------------------------------
+    # Normalize successful result
+    # --------------------------------------------------
+
+        if isinstance(result, dict):
 
             structured_result = result
 
             answer = (
-                result.get("message")
-                or result.get("draft")
-                or (
-                    f"Action '{plan.tool_name}' "
-                    "completed successfully."
-                )
-            )
+            result.get("message")
+            or result.get("status")
+            or f"Action '{plan.tool_name}' "
+               "completed successfully."
+        )
+
+        elif isinstance(result, str):
+
+            structured_result = {
+            "details": result,
+        }
+
+            answer = result
 
         else:
 
             structured_result = {
-                "details": result
-            }
-
-            answer = (
-                f"Action '{plan.tool_name}' "
-                "completed successfully."
-            )
-
-        # --------------------------------------------------
-        # Build structured conversation state
-        # --------------------------------------------------
-
-        context_metadata: dict[str, Any] = {
-            "tool": plan.tool_name,
+            "details": result,
         }
 
-        # Preserve email_id from either:
-        #
-        # 1. tool result
-        # 2. planner arguments
-        #
-        email_id = (
-            structured_result.get("email_id")
-            if isinstance(
-                structured_result,
-                dict,
-            )
-            else None
+            answer = (
+            f"Action '{plan.tool_name}' "
+            "completed successfully."
+        )
+
+    # --------------------------------------------------
+    # Build conversation/action metadata
+    # --------------------------------------------------
+
+        context_metadata: dict[str, Any] = {
+        "tool": plan.tool_name,
+        "action": plan.tool_name,
+    }
+
+    # --------------------------------------------------
+    # Preserve email_id
+    # --------------------------------------------------
+
+        email_id = None
+
+        if isinstance(structured_result, dict):
+
+            email_id = structured_result.get(
+            "email_id"
         )
 
         if email_id is None:
 
             email_id = plan.tool_arguments.get(
-                "email_id"
-            )
+            "email_id"
+        )
 
         if email_id is not None:
 
-            context_metadata[
-                "email_id"
-            ] = email_id
+            context_metadata["email_id"] = email_id
 
-        # Preserve draft_id.
-        draft_id = (
-            structured_result.get("draft_id")
-            if isinstance(
-                structured_result,
-                dict,
-            )
-            else None
+    # --------------------------------------------------
+    # Preserve draft_id
+    # --------------------------------------------------
+
+        draft_id = None
+
+        if isinstance(structured_result, dict):
+
+            draft_id = structured_result.get(
+            "draft_id"
         )
 
         if draft_id is None:
 
             draft_id = plan.tool_arguments.get(
-                "draft_id"
-            )
+            "draft_id"
+        )
 
         if draft_id is not None:
 
-            context_metadata[
-                "draft_id"
-            ] = draft_id
-
-        # Preserve the current action.
-        context_metadata[
-            "action"
-        ] = plan.tool_name
+            context_metadata["draft_id"] = draft_id
 
         logger.debug(
-            "Structured conversation state: %s",
-            context_metadata,
-        )
+        "Structured tool state: %s",
+        context_metadata,
+    )
 
-        # --------------------------------------------------
-        # Return normalized agent result
-        # --------------------------------------------------
+    # --------------------------------------------------
+    # Successful response
+    # --------------------------------------------------
 
         return {
-            "answer": answer,
+        "answer": answer,
+        "tool": plan.tool_name,
+        "tool_result": structured_result,
+        "error": None,
+        "query_plan": plan.model_dump(),
+        "context_metadata": context_metadata,
+    }
+    def _build_tool_error(
+    self,
+    message: str,
+    tool_name: str,
+) -> dict[str, str]:
 
-            "tool": plan.tool_name,
+        message_lower = message.lower()
 
-            "tool_result": structured_result,
+    # --------------------------------------------------
+    # Approval errors
+    # --------------------------------------------------
 
-            "context_metadata": context_metadata,
-
-            "sources": [],
-
-            "emails_found": (
-                structured_result.get(
-                    "emails_found",
-                    0,
-                )
-                if isinstance(
-                    structured_result,
-                    dict,
-                )
-                else 0
-            ),
-
-            "retrieved_emails": (
-                structured_result.get(
-                    "retrieved_emails",
-                    [],
-                )
-                if isinstance(
-                    structured_result,
-                    dict,
-                )
-                else []
-            ),
-
-            "query_plan": plan.model_dump(),
+        if (
+        "approval" in message_lower
+        or "approved" in message_lower
+        or "pending approval" in message_lower
+    ):
+            return {
+            "code": "APPROVAL_REQUIRED",
+            "message": message,
         }
 
+    # --------------------------------------------------
+    # Ownership / authorization errors
+    # --------------------------------------------------
+
+        if (
+        "do not own" in message_lower
+        or "not authorized" in message_lower
+        or "unauthorized" in message_lower
+        or "ownership" in message_lower
+    ):
+            return {
+            "code": "FORBIDDEN",
+            "message": message,
+        }
+
+    # --------------------------------------------------
+    # Missing draft
+    # --------------------------------------------------
+
+        if (
+        "draft" in message_lower
+        and (
+            "not found" in message_lower
+            or "does not exist" in message_lower
+        )
+    ):
+            return {
+            "code": "DRAFT_NOT_FOUND",
+            "message": message,
+        }
+
+    # --------------------------------------------------
+    # Missing Gmail draft
+    # --------------------------------------------------
+
+        if (
+        "gmail draft" in message_lower
+            and (
+            "no gmail draft" in message_lower
+            or "gmail draft id" in message_lower
+            or "save draft" in message_lower
+        )
+    ):
+            return {
+            "code": "GMAIL_DRAFT_REQUIRED",
+            "message": message,
+        }
+
+    # --------------------------------------------------
+    # Missing required input
+    # --------------------------------------------------
+
+        if (
+        "required" in message_lower
+        or "missing" in message_lower
+    ):
+            return {
+            "code": "INVALID_INPUT",
+            "message": message,
+        }
+
+    # --------------------------------------------------
+    # Gmail errors
+    # --------------------------------------------------
+
+        if "gmail" in message_lower:
+
+            return {
+            "code": "GMAIL_ERROR",
+            "message": message,
+        }
+
+    # --------------------------------------------------
+    # Fallback
+    # --------------------------------------------------
+
+        return {
+        "code": "TOOL_ERROR",
+        "message": message,
+    }
     async def _handle_retrieval_request(
         self,
         question: str,

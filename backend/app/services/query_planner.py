@@ -499,6 +499,10 @@ format_instructions
 
         conversation = conversation or []
 
+        # ======================================================
+        # 1. BUILD CONTEXT BEFORE LLM
+        # ======================================================
+
         context = self._get_context_ids(
             conversation
         )
@@ -550,6 +554,10 @@ format_instructions
                 history_parts
             )
 
+        # ======================================================
+        # 2. CALL LLM
+        # ======================================================
+
         llm_instance = get_llm()
 
         chain = (
@@ -586,6 +594,10 @@ format_instructions
                 ),
             )
 
+        # ======================================================
+        # 3. NORMALIZE BASIC PLAN STATE
+        # ======================================================
+
         plan.reasoning = (
             plan.reasoning or ""
         )
@@ -594,9 +606,9 @@ format_instructions
             plan.tool_arguments or {}
         )
 
-        # --------------------------------------------------
-        # Normalize semantic fields
-        # --------------------------------------------------
+        # ======================================================
+        # 4. NORMALIZE SEMANTIC FIELDS
+        # ======================================================
 
         if not plan.semantic_query:
             plan.semantic_query = question
@@ -625,10 +637,10 @@ format_instructions
                 plan.category.strip().lower()
             )
 
-            if plan.category not in [
+            if plan.category not in {
                 c.value
                 for c in EmailCategory
-            ]:
+            }:
                 plan.category = None
 
         if plan.sender:
@@ -671,9 +683,9 @@ format_instructions
         ):
             plan.sort_by = "date"
 
-        # --------------------------------------------------
-        # Normalize tool
-        # --------------------------------------------------
+        # ======================================================
+        # 5. NORMALIZE TOOL NAME
+        # ======================================================
 
         valid_tools = {
             "search_emails",
@@ -702,20 +714,29 @@ format_instructions
                 plan.tool_name = None
                 plan.tool_arguments = {}
 
-        # --------------------------------------------------
-        # Deterministically resolve IDs
-        # --------------------------------------------------
+        # ======================================================
+        # 6. RESOLVE EXPLICIT IDS
+        #
+        # Priority:
+        #
+        # Current user message
+        #        ↓
+        # Conversation metadata
+        #        ↓
+        # LLM output
+        #
+        # Explicit user IDs should always win.
+        # ======================================================
 
-        # Current user IDs always win.
         for key, value in explicit_ids.items():
 
             plan.tool_arguments[key] = value
 
-        # If current message did not contain an ID,
-        # recover it from structured conversation metadata.
+        # Only use conversation context if the current
+        # request did not explicitly provide the ID.
+
         if (
-            "draft_id"
-            not in plan.tool_arguments
+            "draft_id" not in plan.tool_arguments
             and context.get("draft_id") is not None
         ):
             plan.tool_arguments["draft_id"] = (
@@ -723,17 +744,26 @@ format_instructions
             )
 
         if (
-            "email_id"
-            not in plan.tool_arguments
+            "email_id" not in plan.tool_arguments
             and context.get("email_id") is not None
         ):
             plan.tool_arguments["email_id"] = (
                 context["email_id"]
             )
 
-        # --------------------------------------------------
-        # Normalize ID types
-        # --------------------------------------------------
+        # ======================================================
+        # 7. NORMALIZE STRING IDs
+        #
+        # THIS MUST HAPPEN BEFORE REQUIRED ARGUMENT
+        # VALIDATION.
+        #
+        # Examples:
+        #
+        # "15"       -> 15
+        # "Draft 15" -> 15
+        # "draft_id: 15" -> 15
+        # "Email 10" -> 10
+        # ======================================================
 
         for key in (
             "email_id",
@@ -744,10 +774,32 @@ format_instructions
                 key
             )
 
+            if value is None:
+                continue
+
+            if isinstance(value, bool):
+                # bool is technically an int in Python,
+                # but must never be accepted as an ID.
+                plan.tool_arguments.pop(
+                    key,
+                    None,
+                )
+                continue
+
             if isinstance(value, int):
+
+                if value > 0:
+                    continue
+
+                plan.tool_arguments.pop(
+                    key,
+                    None,
+                )
                 continue
 
             if isinstance(value, str):
+
+                value = value.strip()
 
                 match = re.search(
                     r"\d+",
@@ -755,13 +807,70 @@ format_instructions
                 )
 
                 if match:
-                    plan.tool_arguments[key] = int(
+
+                    normalized_id = int(
                         match.group()
                     )
 
-        # --------------------------------------------------
-        # Infer rewrite instruction
-        # --------------------------------------------------
+                    if normalized_id > 0:
+
+                        plan.tool_arguments[key] = (
+                            normalized_id
+                        )
+
+                    else:
+
+                        plan.tool_arguments.pop(
+                            key,
+                            None,
+                        )
+
+                else:
+
+                    # No numeric ID could be extracted.
+                    # Leave the argument missing so the
+                    # required-argument validation below
+                    # can trigger clarification.
+                    plan.tool_arguments.pop(
+                        key,
+                        None,
+                    )
+
+            else:
+
+                # Unsupported ID type.
+                plan.tool_arguments.pop(
+                    key,
+                    None,
+                )
+
+        # ======================================================
+        # 8. NORMALIZE TONE
+        # ======================================================
+
+        if plan.tool_name == "generate_reply":
+
+            tone = plan.tool_arguments.get(
+                "tone"
+            )
+
+            if tone is None:
+                tone = "professional"
+
+            else:
+                tone = str(tone).strip().lower()
+
+                if not tone:
+                    tone = "professional"
+
+            plan.tool_arguments["tone"] = tone
+
+        # ======================================================
+        # 9. NORMALIZE REWRITE INSTRUCTION
+        #
+        # This happens before required-argument validation
+        # because instruction is required for rewrite_reply.
+        # ======================================================
 
         if plan.tool_name == "rewrite_reply":
 
@@ -771,51 +880,35 @@ format_instructions
                 )
             )
 
-            if instruction is None:
-
-                # Recover instruction from current user
-                # request when the LLM omitted it.
-                normalized_question = (
-                    question.strip()
-                )
-
-                if normalized_question:
-                    plan.tool_arguments[
-                        "instruction"
-                    ] = normalized_question
-
-            else:
+            if instruction is not None:
 
                 instruction = str(
                     instruction
                 ).strip()
 
-                if instruction:
+            if not instruction:
 
-                    plan.tool_arguments[
-                        "instruction"
-                    ] = instruction
+                instruction = question.strip()
 
-                else:
+            if instruction:
 
-                    plan.tool_arguments[
-                        "instruction"
-                    ] = question.strip()
+                plan.tool_arguments[
+                    "instruction"
+                ] = instruction
 
-        # --------------------------------------------------
-        # Generate reply default tone
-        # --------------------------------------------------
+            else:
 
-        if plan.tool_name == "generate_reply":
+                plan.tool_arguments.pop(
+                    "instruction",
+                    None,
+                )
 
-            plan.tool_arguments.setdefault(
-                "tone",
-                "professional",
-            )
-
-        # --------------------------------------------------
-        # Required arguments
-        # --------------------------------------------------
+        # ======================================================
+        # 10. REQUIRED ARGUMENT DEFINITIONS
+        #
+        # IMPORTANT:
+        # This is AFTER ID NORMALIZATION.
+        # ======================================================
 
         required_tool_arguments = {
 
@@ -858,9 +951,11 @@ format_instructions
             ],
         }
 
-        # --------------------------------------------------
-        # Validate tool
-        # --------------------------------------------------
+        # ======================================================
+        # 11. VALIDATE REQUIRED ARGUMENTS
+        #
+        # NOW values like "Draft 15" have already become 15.
+        # ======================================================
 
         if plan.needs_tool:
 
@@ -882,6 +977,7 @@ format_instructions
                 )
 
                 if value is None:
+
                     missing.append(argument)
                     continue
 
@@ -889,7 +985,12 @@ format_instructions
                     isinstance(value, str)
                     and not value.strip()
                 ):
+
                     missing.append(argument)
+
+            # ==================================================
+            # 12. CLARIFICATION
+            # ==================================================
 
             if missing:
 
@@ -923,9 +1024,21 @@ format_instructions
                         + "."
                     )
 
-                # Do not execute incomplete tool calls.
+                # Never execute an incomplete tool call.
                 plan.needs_tool = False
                 plan.tool_name = None
+
+                # Keep the clarification state, but don't
+                # pass incomplete arguments to the executor.
                 plan.tool_arguments = {}
+
+        # ======================================================
+        # 13. FINAL PLAN
+        # ======================================================
+
+        logger.debug(
+            "Final normalized QueryPlan: %s",
+            plan.model_dump(),
+        )
 
         return plan

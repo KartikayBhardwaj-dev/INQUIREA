@@ -12,10 +12,6 @@ class SendReplyTool(BaseTool):
         self,
         **kwargs,
     ):
-        # -----------------------------------------------------
-        # Validate required inputs
-        # -----------------------------------------------------
-
         draft_id = kwargs.get("draft_id")
         user_id = kwargs.get("user_id")
         db = kwargs.get("db")
@@ -35,25 +31,6 @@ class SendReplyTool(BaseTool):
                 "Database session missing."
             )
 
-        # -----------------------------------------------------
-        # Send through GmailActionService.
-        #
-        # IMPORTANT:
-        # All security checks happen inside
-        # GmailActionService.send_reply():
-        #
-        # 1. Draft exists
-        # 2. Draft belongs to user
-        # 3. Email belongs to user
-        # 4. Draft is current
-        # 5. Approval exists
-        # 6. Approval == approved
-        # 7. Gmail draft ID exists
-        # 8. Gmail send succeeds
-        #
-        # The tool itself must NOT bypass any of these checks.
-        # -----------------------------------------------------
-
         service = GmailActionService(
             db=db,
         )
@@ -62,10 +39,6 @@ class SendReplyTool(BaseTool):
             draft_id=draft_id,
             user_id=user_id,
         )
-
-        # -----------------------------------------------------
-        # Return frontend-friendly response
-        # -----------------------------------------------------
 
         return {
             "draft_id": result["draft_id"],

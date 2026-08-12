@@ -12,10 +12,6 @@ class UpdateDraftTool(BaseTool):
         self,
         **kwargs,
     ):
-        # =====================================================
-        # VALIDATE INPUT
-        # =====================================================
-
         draft_id = kwargs.get("draft_id")
         user_id = kwargs.get("user_id")
         db = kwargs.get("db")
@@ -35,20 +31,14 @@ class UpdateDraftTool(BaseTool):
                 "Database session missing."
             )
 
-        # =====================================================
-        # UPDATE / CREATE GMAIL DRAFT
-        # =====================================================
-
-        service = GmailActionService(db)
+        service = GmailActionService(
+            db=db,
+        )
 
         result = await service.update_draft(
             draft_id=draft_id,
             user_id=user_id,
         )
-
-        # =====================================================
-        # FRONTEND RESPONSE
-        # =====================================================
 
         return {
             "draft_id": result["draft_id"],

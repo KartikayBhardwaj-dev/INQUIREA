@@ -14,7 +14,6 @@ from backend.app.services.draft_service import DraftService
 from backend.app.services.gmail_service import GmailService
 from backend.app.services.google_token_service import GoogleTokenService
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -22,34 +21,36 @@ class GmailActionService:
     """
     Gmail action orchestration service.
 
-    Lifecycle:
+    Transaction rule:
 
-        Generate
+        Validate DB
             ↓
-        DB Draft
+        Call Gmail
             ↓
-        Edit DB Draft
+        Gmail succeeds
             ↓
-        Save / Update Gmail Draft
+        Update DB
             ↓
-        Approve
+        flush()
             ↓
-        Send
-            ↓
-        is_sent = True
-        gmail_message_id = Gmail message ID
-        sent_at = current time
-        is_current = False
+        commit()
 
-    Security invariants:
+        Exception
+            ↓
+        rollback()
 
-        1. Draft belongs to authenticated user.
-        2. Email belongs to authenticated user.
-        3. Only current draft can be sent.
-        4. Approval must exist and be APPROVED.
-        5. Gmail draft must exist before sending.
-        6. Gmail message ID must be returned before marking
-           the draft as sent.
+    IMPORTANT:
+
+    Gmail is an external system. A successful Gmail API call
+    cannot be rolled back by SQLAlchemy.
+
+    Therefore:
+
+        Gmail operation MUST happen before DB state is marked
+        as successful.
+
+    This prevents the database from saying "sent" when Gmail
+    actually failed.
     """
 
     def __init__(self, db: Session):
@@ -137,9 +138,6 @@ class GmailActionService:
                 f"Draft {draft_id} not found."
             )
 
-        # Defense-in-depth:
-        # Ensure the associated email belongs
-        # to the same authenticated user.
         self._load_email(
             email_id=draft.email_id,
             user_id=user_id,
@@ -152,244 +150,226 @@ class GmailActionService:
     # =========================================================
 
     async def save_draft(
-    self,
-    draft_id: int,
-    user_id: int,
-) -> dict[str, Any]:
+        self,
+        draft_id: int,
+        user_id: int,
+    ) -> dict[str, Any]:
         """
-    Save the current DB draft to Gmail.
+        Save DB draft to Gmail.
 
-    Lifecycle:
+        Existing Gmail draft:
+            UPDATE
 
-        No gmail_draft_id
-            ↓
-        Create Gmail draft
+        No Gmail draft:
+            CREATE
 
-        Existing gmail_draft_id
-            ↓
-        Update existing Gmail draft
+        DB is only updated after Gmail succeeds.
+        """
 
-    Never create duplicate Gmail drafts.
-    """
+        try:
+            draft = self._load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
+            )
 
-    # =========================================================
-    # LOAD + OWNERSHIP
-    # =========================================================
+            email = self._load_email(
+                email_id=draft.email_id,
+                user_id=user_id,
+            )
 
-        draft = self._load_draft(
-        draft_id=draft_id,
-        user_id=user_id,
-    )
+            gmail = await self._get_gmail_service(
+                user_id=user_id,
+            )
 
-        email = self._load_email(
-        email_id=draft.email_id,
-        user_id=user_id,
-    )
+            # -------------------------------------------------
+            # Existing Gmail draft
+            # -------------------------------------------------
 
-    # =========================================================
-    # GMAIL SERVICE
-    # =========================================================
+            if draft.gmail_draft_id:
 
-        gmail = await self._get_gmail_service(
-        user_id=user_id,
-    )
+                gmail_result = await gmail.update_draft(
+                    draft_id=draft.gmail_draft_id,
+                    to=email.sender,
+                    subject=f"Re: {email.subject}",
+                    body=draft.draft,
+                    thread_id=email.gmail_thread_id,
+                )
 
-    # =========================================================
-    # EXISTING GMAIL DRAFT
-    # =========================================================
+                gmail_draft_id = gmail_result.get(
+                    "id",
+                    draft.gmail_draft_id,
+                )
 
-        if draft.gmail_draft_id:
+                if not gmail_draft_id:
+                    raise ValueError(
+                        "Gmail did not return a draft ID "
+                        "after updating the draft."
+                    )
 
-            gmail_result = await gmail.update_draft(
-            draft_id=draft.gmail_draft_id,
-            to=email.sender,
-            subject=f"Re: {email.subject}",
-            body=draft.draft,
-            thread_id=email.gmail_thread_id,
-        )
+            # -------------------------------------------------
+            # No Gmail draft → create
+            # -------------------------------------------------
 
-            gmail_draft_id = gmail_result.get(
-            "id",
-            draft.gmail_draft_id,
-        )
+            else:
+
+                gmail_result = await gmail.create_draft(
+                    to=email.sender,
+                    subject=f"Re: {email.subject}",
+                    body=draft.draft,
+                    thread_id=email.gmail_thread_id,
+                )
+
+                gmail_draft_id = gmail_result.get("id")
+
+                if not gmail_draft_id:
+                    raise ValueError(
+                        "Gmail did not return a draft ID "
+                        "after creating the draft."
+                    )
+
+            # -------------------------------------------------
+            # Gmail succeeded.
+            #
+            # Only now update DB.
+            # -------------------------------------------------
 
             draft.gmail_draft_id = gmail_draft_id
 
+            self.db.flush()
             self.db.commit()
+
             self.db.refresh(draft)
 
             logger.info(
-            "Updated existing Gmail draft %s "
-            "from DB draft %s.",
-            gmail_draft_id,
-            draft.id,
-        )
+                "Draft %s saved to Gmail. Gmail draft ID=%s",
+                draft.id,
+                gmail_draft_id,
+            )
 
             return {
-            "success": True,
-            "draft_id": draft.id,
-            "gmail_draft_id": gmail_draft_id,
-            "status": "saved",
-            "message": "Draft saved to Gmail.",
-        }
+                "success": True,
+                "draft_id": draft.id,
+                "gmail_draft_id": gmail_draft_id,
+                "status": "saved",
+                "message": "Draft saved to Gmail.",
+            }
+
+        except Exception:
+            # If Gmail failed, any DB changes in this transaction
+            # are discarded.
+            self.db.rollback()
+            raise
 
     # =========================================================
-    # NO GMAIL DRAFT YET → CREATE ONE
-    # =========================================================
-
-        gmail_result = await gmail.create_draft(
-        to=email.sender,
-        subject=f"Re: {email.subject}",
-        body=draft.draft,
-        thread_id=email.gmail_thread_id,
-    )
-
-        gmail_draft_id = gmail_result.get("id")
-
-        if not gmail_draft_id:
-            raise ValueError(
-            "Gmail did not return a draft ID."
-        )
-
-        draft.gmail_draft_id = gmail_draft_id
-
-        self.db.commit()
-        self.db.refresh(draft)
-
-        logger.info(
-        "Created Gmail draft %s "
-        "from DB draft %s.",
-        gmail_draft_id,
-        draft.id,
-    )
-
-        return {
-        "success": True,
-        "draft_id": draft.id,
-        "gmail_draft_id": gmail_draft_id,
-        "status": "saved",
-        "message": "Draft saved to Gmail.",
-    }
-
-    # =========================================================
-    # UPDATE GMAIL DRAFT
+    # UPDATE DRAFT
     # =========================================================
 
     async def update_draft(
-    self,
-    draft_id: int,
-    user_id: int,
-) -> dict[str, Any]:
+        self,
+        draft_id: int,
+        user_id: int,
+    ) -> dict[str, Any]:
         """
-    Synchronize the current DB draft with Gmail.
+        Synchronize current DB draft with Gmail.
 
-    Existing Gmail draft:
-        DB draft
-            ↓
-        Gmail UPDATE
+        Existing gmail_draft_id:
+            Gmail UPDATE
 
-    No Gmail draft:
-        DB draft
-            ↓
-        Gmail CREATE
-    """
+        Missing gmail_draft_id:
+            Gmail CREATE
 
-    # =========================================================
-    # LOAD DB DRAFT + OWNERSHIP
-    # =========================================================
+        DB changes are committed only after Gmail succeeds.
+        """
 
-        draft = self._load_draft(
-        draft_id=draft_id,
-        user_id=user_id,
-    )
+        try:
+            draft = self._load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
+            )
 
-        email = self._load_email(
-        email_id=draft.email_id,
-        user_id=user_id,
-    )
+            email = self._load_email(
+                email_id=draft.email_id,
+                user_id=user_id,
+            )
 
-    # =========================================================
-    # GET GMAIL SERVICE
-    # =========================================================
+            gmail = await self._get_gmail_service(
+                user_id=user_id,
+            )
 
-        gmail = await self._get_gmail_service(
-        user_id=user_id,
-    )
+            # -------------------------------------------------
+            # Existing Gmail draft → UPDATE
+            # -------------------------------------------------
 
-    # =========================================================
-    # EXISTING GMAIL DRAFT → UPDATE
-    # =========================================================
+            if draft.gmail_draft_id:
 
-        if draft.gmail_draft_id:
+                gmail_result = await gmail.update_draft(
+                    draft_id=draft.gmail_draft_id,
+                    to=email.sender,
+                    subject=f"Re: {email.subject}",
+                    body=draft.draft,
+                    thread_id=email.gmail_thread_id,
+                )
 
-            gmail_result = await gmail.update_draft(
-            draft_id=draft.gmail_draft_id,
-            to=email.sender,
-            subject=f"Re: {email.subject}",
-            body=draft.draft,
-            thread_id=email.gmail_thread_id,
-        )
+                gmail_draft_id = gmail_result.get(
+                    "id",
+                    draft.gmail_draft_id,
+                )
 
-            gmail_draft_id = gmail_result.get(
-            "id",
-            draft.gmail_draft_id,
-        )
+                if not gmail_draft_id:
+                    raise ValueError(
+                        "Gmail did not return a draft ID "
+                        "after updating."
+                    )
+
+            # -------------------------------------------------
+            # No Gmail draft → CREATE
+            # -------------------------------------------------
+
+            else:
+
+                gmail_result = await gmail.create_draft(
+                    to=email.sender,
+                    subject=f"Re: {email.subject}",
+                    body=draft.draft,
+                    thread_id=email.gmail_thread_id,
+                )
+
+                gmail_draft_id = gmail_result.get("id")
+
+                if not gmail_draft_id:
+                    raise ValueError(
+                        "Gmail did not return a draft ID "
+                        "after creating."
+                    )
+
+            # -------------------------------------------------
+            # Gmail succeeded.
+            # -------------------------------------------------
 
             draft.gmail_draft_id = gmail_draft_id
 
+            self.db.flush()
             self.db.commit()
+
             self.db.refresh(draft)
 
             logger.info(
-            "Updated Gmail draft %s "
-            "from DB draft %s.",
-            gmail_draft_id,
-            draft.id,
-        )
+                "Updated/synchronized Gmail draft %s "
+                "from DB draft %s.",
+                gmail_draft_id,
+                draft.id,
+            )
 
             return {
-            "success": True,
-            "draft_id": draft.id,
-            "gmail_draft_id": gmail_draft_id,
-            "status": "updated",
-        }
+                "success": True,
+                "draft_id": draft.id,
+                "gmail_draft_id": gmail_draft_id,
+                "status": "updated",
+            }
 
-    # =========================================================
-    # NO GMAIL DRAFT → CREATE
-    # =========================================================
-
-        gmail_result = await gmail.create_draft(
-        to=email.sender,
-        subject=f"Re: {email.subject}",
-        body=draft.draft,
-        thread_id=email.gmail_thread_id,
-    )
-
-        gmail_draft_id = gmail_result.get("id")
-
-        if not gmail_draft_id:
-            raise ValueError(
-            "Gmail did not return a draft ID."
-        )
-
-        draft.gmail_draft_id = gmail_draft_id
-
-        self.db.commit()
-        self.db.refresh(draft)
-
-        logger.info(
-        "Created Gmail draft %s "
-        "from DB draft %s.",
-        gmail_draft_id,
-        draft.id,
-    )
-
-        return {
-        "success": True,
-        "draft_id": draft.id,
-        "gmail_draft_id": gmail_draft_id,
-        "status": "updated",
-    }
+        except Exception:
+            self.db.rollback()
+            raise
 
     # =========================================================
     # SEND REPLY
@@ -407,119 +387,118 @@ class GmailActionService:
 
             draft exists
             +
-            correct owner
+            user owns draft
             +
-            current version
+            email belongs to user
+            +
+            draft is current
             +
             approval == approved
             +
-            Gmail draft exists
+            gmail_draft_id exists
 
-        After successful Gmail send:
-
-            is_sent = True
-            gmail_message_id = Gmail message ID
-            sent_at = current timestamp
-            is_current = False
+        Gmail must successfully return a message ID before
+        the DB is marked as SENT.
         """
 
-        # -----------------------------------------------------
-        # 1. Load draft and validate ownership.
-        # -----------------------------------------------------
+        try:
+            # -------------------------------------------------
+            # 1. Load + ownership
+            # -------------------------------------------------
 
-        draft = self._load_draft(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
-
-        # -----------------------------------------------------
-        # 2. Prevent sending old/superseded versions.
-        # -----------------------------------------------------
-
-        if not draft.is_current:
-            raise ValueError(
-                f"Draft {draft_id} cannot be sent. "
-                "It is not the current draft version."
+            draft = self._load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
             )
 
-        # -----------------------------------------------------
-        # 3. Approval is mandatory.
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # 2. Current version only
+            # -------------------------------------------------
 
-        self._ensure_approved(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
+            if not draft.is_current:
+                raise ValueError(
+                    f"Draft {draft_id} cannot be sent. "
+                    "It is not the current draft version."
+                )
 
-        # -----------------------------------------------------
-        # 4. Gmail draft must exist.
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # 3. Approval
+            # -------------------------------------------------
 
-        if not draft.gmail_draft_id:
-            raise ValueError(
-                f"Draft {draft_id} has no Gmail draft ID. "
-                "Save draft to Gmail first."
+            self._ensure_approved(
+                draft_id=draft_id,
+                user_id=user_id,
             )
 
-        # -----------------------------------------------------
-        # 5. Get authenticated Gmail service.
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # 4. Gmail draft required
+            # -------------------------------------------------
 
-        gmail = await self._get_gmail_service(
-            user_id=user_id,
-        )
+            if not draft.gmail_draft_id:
+                raise ValueError(
+                    f"Draft {draft_id} has no Gmail draft ID. "
+                    "Save draft to Gmail first."
+                )
 
-        # -----------------------------------------------------
-        # 6. Send Gmail draft.
-        #
-        # IMPORTANT:
-        # Do NOT update the DB before this succeeds.
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # 5. Gmail service
+            # -------------------------------------------------
 
-        send_result = await gmail.send_draft(
-            draft_id=draft.gmail_draft_id,
-        )
-
-        # -----------------------------------------------------
-        # 7. Gmail must return the sent message ID.
-        # -----------------------------------------------------
-
-        gmail_message_id = send_result.get(
-            "id"
-        )
-
-        if not gmail_message_id:
-            raise ValueError(
-                "Gmail did not return a message ID "
-                "after sending."
+            gmail = await self._get_gmail_service(
+                user_id=user_id,
             )
 
-        # -----------------------------------------------------
-        # 8. Persist successful send state.
-        # -----------------------------------------------------
+            # -------------------------------------------------
+            # 6. IMPORTANT:
+            #
+            # Gmail send happens BEFORE any DB send-state
+            # is persisted.
+            # -------------------------------------------------
 
-        self._update_after_send(
-            draft=draft,
-            user_id=user_id,
-            gmail_message_id=gmail_message_id,
-        )
+            send_result = await gmail.send_draft(
+                draft_id=draft.gmail_draft_id,
+            )
 
-        logger.info(
-            "Draft %s sent successfully by user %s. "
-            "Gmail message ID=%s",
-            draft_id,
-            user_id,
-            gmail_message_id,
-        )
+            gmail_message_id = send_result.get("id")
 
-        return {
-            "success": True,
-            "draft_id": draft_id,
-            "gmail_message_id": gmail_message_id,
-            "message": (
-                f"Draft {draft_id} successfully sent."
-            ),
-        }
+            if not gmail_message_id:
+                raise ValueError(
+                    "Gmail did not return a message ID "
+                    "after sending."
+                )
+
+            # -------------------------------------------------
+            # 7. Gmail succeeded.
+            #
+            # Now update DB.
+            # -------------------------------------------------
+
+            self._update_after_send(
+                draft=draft,
+                user_id=user_id,
+                gmail_message_id=gmail_message_id,
+            )
+
+            logger.info(
+                "Draft %s sent successfully by user %s. "
+                "Gmail message ID=%s",
+                draft_id,
+                user_id,
+                gmail_message_id,
+            )
+
+            return {
+                "success": True,
+                "draft_id": draft_id,
+                "gmail_message_id": gmail_message_id,
+                "message": (
+                    f"Draft {draft_id} successfully sent."
+                ),
+            }
+
+        except Exception:
+            self.db.rollback()
+            raise
 
     # =========================================================
     # APPROVAL VALIDATION
@@ -530,13 +509,7 @@ class GmailActionService:
         draft_id: int,
         user_id: int,
     ) -> None:
-        """
-        Absolute backend invariant:
 
-        ONLY approved drafts can be sent.
-        """
-
-        # Defense-in-depth ownership validation.
         draft = self._load_draft(
             draft_id=draft_id,
             user_id=user_id,
@@ -546,11 +519,11 @@ class GmailActionService:
             draft_id=draft.id,
         )
 
-        # Missing approval = pending.
-        if approval is None:
-            status = "pending"
-        else:
-            status = approval.status
+        status = (
+            "pending"
+            if approval is None
+            else approval.status
+        )
 
         if status != "approved":
             raise ValueError(
@@ -569,44 +542,35 @@ class GmailActionService:
         gmail_message_id: str,
     ) -> None:
         """
-        Persist the successful Gmail send.
+        Persist successful Gmail send state.
 
-        Database state becomes:
+        This method does NOT call commit itself.
 
-            is_sent = True
-            gmail_message_id = <Gmail message ID>
-            sent_at = current UTC time
-            is_current = False
+        The caller owns the transaction.
         """
-
-        # -----------------------------------------------------
-        # Defense-in-depth ownership check.
-        # -----------------------------------------------------
 
         if draft.user_id != user_id:
             raise ValueError(
                 "You do not own this draft."
             )
 
-        # -----------------------------------------------------
-        # Persist send state.
-        # -----------------------------------------------------
-
         draft.is_sent = True
         draft.gmail_message_id = gmail_message_id
         draft.sent_at = datetime.utcnow()
         draft.is_current = False
 
-        # -----------------------------------------------------
-        # Commit transaction.
-        # -----------------------------------------------------
+        # Flush only.
+        #
+        # send_reply() owns the transaction and commits after
+        # this succeeds.
+        self.db.flush()
 
         self.db.commit()
         self.db.refresh(draft)
 
         logger.info(
-            "Persisted sent state for draft %s. "
-            "gmail_message_id=%s sent_at=%s",
+            "Persisted sent state for Draft %s. "
+            "Gmail message ID=%s sent_at=%s",
             draft.id,
             draft.gmail_message_id,
             draft.sent_at,

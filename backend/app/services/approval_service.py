@@ -20,10 +20,24 @@ class ApprovalService:
           └── REJECT  → REJECTED
 
         APPROVED
-          └── EDIT → PENDING
+          └── EDIT / REWRITE → PENDING
 
         REJECTED
-          └── EDIT / REGENERATE → PENDING
+          └── EDIT / REWRITE → PENDING
+
+    Transaction rule:
+
+        Service operation
+            ↓
+        DB changes
+            ↓
+        flush()
+            ↓
+        commit()
+
+        Exception
+            ↓
+        rollback()
     """
 
     def __init__(self, db: Session):
@@ -76,43 +90,57 @@ class ApprovalService:
         user_id: int,
     ) -> Approval:
 
-        draft = self.load_draft(
-            draft_id,
-            user_id=user_id,
-        )
-
-        if draft is None:
-            raise ValueError(
-                f"Draft {draft_id} not found."
+        try:
+            draft = self.load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
             )
 
-        approval = self.load_approval(draft_id)
+            if draft is None:
+                raise ValueError(
+                    f"Draft {draft_id} not found."
+                )
 
-        if approval is None:
-            approval = Approval(
-                draft_reply_id=draft_id,
-                status=ApprovalStatus.PENDING.value,
+            approval = self.load_approval(
+                draft_id=draft_id,
             )
-            self.db.add(approval)
+
+            if approval is None:
+                approval = Approval(
+                    draft_reply_id=draft_id,
+                    status=ApprovalStatus.PENDING.value,
+                )
+
+                self.db.add(approval)
+                self.db.flush()
+
+            self._validate_transition(
+                current_status=approval.status,
+                new_status=ApprovalStatus.APPROVED.value,
+            )
+
+            approval.status = ApprovalStatus.APPROVED.value
+
+            # Make sure SQLAlchemy sends the UPDATE.
             self.db.flush()
 
-        self._validate_transition(
-            current_status=approval.status,
-            new_status=ApprovalStatus.APPROVED.value,
-        )
+            # Standalone service workflow:
+            # commit only after everything succeeded.
+            self.db.commit()
 
-        approval.status = ApprovalStatus.APPROVED.value
+            self.db.refresh(approval)
 
-        self.db.commit()
-        self.db.refresh(approval)
+            logger.info(
+                "Draft %s approved by User %s.",
+                draft_id,
+                user_id,
+            )
 
-        logger.info(
-            "Draft %s approved by User %s.",
-            draft_id,
-            user_id,
-        )
+            return approval
 
-        return approval
+        except Exception:
+            self.db.rollback()
+            raise
 
     # =========================================================
     # REJECT
@@ -124,43 +152,54 @@ class ApprovalService:
         user_id: int,
     ) -> Approval:
 
-        draft = self.load_draft(
-            draft_id,
-            user_id=user_id,
-        )
-
-        if draft is None:
-            raise ValueError(
-                f"Draft {draft_id} not found."
+        try:
+            draft = self.load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
             )
 
-        approval = self.load_approval(draft_id)
+            if draft is None:
+                raise ValueError(
+                    f"Draft {draft_id} not found."
+                )
 
-        if approval is None:
-            approval = Approval(
-                draft_reply_id=draft_id,
-                status=ApprovalStatus.PENDING.value,
+            approval = self.load_approval(
+                draft_id=draft_id,
             )
-            self.db.add(approval)
+
+            if approval is None:
+                approval = Approval(
+                    draft_reply_id=draft_id,
+                    status=ApprovalStatus.PENDING.value,
+                )
+
+                self.db.add(approval)
+                self.db.flush()
+
+            self._validate_transition(
+                current_status=approval.status,
+                new_status=ApprovalStatus.REJECTED.value,
+            )
+
+            approval.status = ApprovalStatus.REJECTED.value
+
             self.db.flush()
 
-        self._validate_transition(
-            current_status=approval.status,
-            new_status=ApprovalStatus.REJECTED.value,
-        )
+            self.db.commit()
 
-        approval.status = ApprovalStatus.REJECTED.value
+            self.db.refresh(approval)
 
-        self.db.commit()
-        self.db.refresh(approval)
+            logger.info(
+                "Draft %s rejected by User %s.",
+                draft_id,
+                user_id,
+            )
 
-        logger.info(
-            "Draft %s rejected by User %s.",
-            draft_id,
-            user_id,
-        )
+            return approval
 
-        return approval
+        except Exception:
+            self.db.rollback()
+            raise
 
     # =========================================================
     # STATUS
@@ -173,7 +212,7 @@ class ApprovalService:
     ) -> str:
 
         draft = self.load_draft(
-            draft_id,
+            draft_id=draft_id,
             user_id=user_id,
         )
 
@@ -182,7 +221,9 @@ class ApprovalService:
                 f"Draft {draft_id} not found."
             )
 
-        approval = self.load_approval(draft_id)
+        approval = self.load_approval(
+            draft_id=draft_id,
+        )
 
         if approval is None:
             return ApprovalStatus.PENDING.value
@@ -217,19 +258,11 @@ class ApprovalService:
                 f"'{new_status}'."
             )
 
-        # -----------------------------------------------------
-        # PENDING → APPROVED
-        # -----------------------------------------------------
-
         if (
             current_status == ApprovalStatus.PENDING.value
             and new_status == ApprovalStatus.APPROVED.value
         ):
             return
-
-        # -----------------------------------------------------
-        # PENDING → REJECTED
-        # -----------------------------------------------------
 
         if (
             current_status == ApprovalStatus.PENDING.value
@@ -253,41 +286,57 @@ class ApprovalService:
         commit: bool = True,
     ) -> Approval:
 
-        draft = self.load_draft(
-            draft_id,
-            user_id=user_id,
-        )
-
-        if draft is None:
-            raise ValueError(
-                f"Draft {draft_id} not found."
+        try:
+            draft = self.load_draft(
+                draft_id=draft_id,
+                user_id=user_id,
             )
 
-        approval = self.load_approval(draft_id)
+            if draft is None:
+                raise ValueError(
+                    f"Draft {draft_id} not found."
+                )
 
-        if approval is None:
-            approval = Approval(
-                draft_reply_id=draft_id,
-                status=ApprovalStatus.PENDING.value,
+            approval = self.load_approval(
+                draft_id=draft_id,
             )
-            self.db.add(approval)
-        else:
-            # -------------------------------------------------
-            # EDIT / REWRITE / REGENERATE
-            # always returns approval to pending.
-            # -------------------------------------------------
-            approval.status = ApprovalStatus.PENDING.value
 
-        self.db.flush()
+            if approval is None:
+                approval = Approval(
+                    draft_reply_id=draft_id,
+                    status=ApprovalStatus.PENDING.value,
+                )
 
-        if commit:
-            self.db.commit()
-            self.db.refresh(approval)
+                self.db.add(approval)
 
-        logger.info(
-            "Draft %s reset to PENDING for User %s.",
-            draft_id,
-            user_id,
-        )
+            else:
+                approval.status = (
+                    ApprovalStatus.PENDING.value
+                )
 
-        return approval
+            # Always flush so the caller can use the
+            # generated/updated DB state.
+            self.db.flush()
+
+            if commit:
+                self.db.commit()
+                self.db.refresh(approval)
+
+            logger.info(
+                "Draft %s reset to PENDING for User %s.",
+                draft_id,
+                user_id,
+            )
+
+            return approval
+
+        except Exception:
+            # If this method participates in a larger
+            # transaction, the caller passes commit=False.
+            #
+            # In that case the caller still owns the transaction,
+            # so rollback is intentionally left to the caller.
+            if commit:
+                self.db.rollback()
+
+            raise
