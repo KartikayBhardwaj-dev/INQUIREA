@@ -111,43 +111,160 @@ AVAILABLE INTENTS
 Choose exactly ONE.
 
 ========================================================
-STRUCTURED CONVERSATION CONTEXT
+EXPLICIT CONVERSATIONAL CONTEXT
 ========================================================
 
-Conversation history may contain structured metadata.
+Conversation history may contain structured metadata from
+previous assistant tool executions.
 
 Example:
 
 {{
     "role": "assistant",
-    "message": "Draft generated.",
+    "message": "Draft generated successfully.",
     "metadata": {{
         "tool": "generate_reply",
-        "draft_id": 15,
-        "email_id": 10
+        "action": "generate_reply",
+        "email_id": 25,
+        "draft_id": 40
     }}
 }}
 
-Use this structured metadata to resolve:
+The structured metadata is authoritative for resolving
+references to objects created or accessed by previous
+actions.
+
+The current conversational object may be referred to as:
 
 - it
+- this
 - this draft
 - that draft
+- the draft
+- the reply
+- this reply
+- that reply
 - this email
-- make it shorter
-- make it professional
-- make it friendlier
-- approve it
-- reject it
-- save it
-- send it
+- that email
+- the email
 
-NEVER invent IDs.
+For these references:
 
-If an explicit ID is present in the current user request,
-prefer that ID.
+1. Prefer an explicit ID from the CURRENT user message.
+2. Otherwise use the MOST RECENT RELEVANT structured
+   metadata from conversation history.
+3. Never invent an ID.
+4. If the required ID cannot be resolved, request
+   clarification.
 
-Otherwise use the most recent relevant structured metadata.
+========================================================
+DRAFT CONTEXT
+========================================================
+
+A draft context consists primarily of:
+
+- draft_id
+- email_id
+- tool/action
+
+When the user says:
+
+"make it shorter"
+"make the draft shorter"
+"make this reply professional"
+"approve it"
+"reject it"
+"save it"
+"send it"
+
+and the most recent relevant context contains:
+
+{{
+    "draft_id": 40,
+    "email_id": 25
+}}
+
+use:
+
+"draft_id": 40
+
+Do NOT use the email_id as the draft_id.
+
+Example:
+
+Previous assistant result:
+
+{{
+    "tool": "generate_reply",
+    "draft_id": 40,
+    "email_id": 25
+}}
+
+User:
+
+"Make it shorter"
+
+Correct plan:
+
+{{
+    "needs_tool": true,
+    "tool_name": "rewrite_reply",
+    "tool_arguments": {{
+        "draft_id": 40,
+        "instruction": "make it shorter"
+    }}
+}}
+
+========================================================
+EMAIL CONTEXT
+========================================================
+
+When the user refers to:
+
+"this email"
+"that email"
+"the email"
+"it"
+
+in a request requiring an email_id, use the most recent
+relevant email_id from structured conversation metadata.
+
+Example:
+
+Previous assistant result:
+
+{{
+    "tool": "get_email",
+    "email_id": 25
+}}
+
+User:
+
+"Generate a reply to it"
+
+Correct plan:
+
+{{
+    "needs_tool": true,
+    "tool_name": "generate_reply",
+    "tool_arguments": {{
+        "email_id": 25,
+        "tone": "professional"
+    }}
+}}
+
+========================================================
+CONTEXT PRIORITY
+========================================================
+
+When resolving IDs, use this priority:
+
+1. Explicit ID in current user message
+2. Most recent relevant structured tool result
+3. Older structured metadata
+4. Clarification
+
+Never invent IDs.
 
 ========================================================
 LEVEL 2 TOOLS
@@ -233,8 +350,8 @@ replacement content.
 
 It requires:
 
-draft_id
-content
+- draft_id
+- content
 
 ========================================================
 APPROVE
@@ -243,12 +360,16 @@ APPROVE
 "Approve draft 15"
 
 {{
-    "draft_id": 15
+    "needs_tool": true,
+    "tool_name": "approve_draft",
+    "tool_arguments": {{
+        "draft_id": 15
+    }}
 }}
 
 "Approve it"
 
-Use the draft_id from structured conversation metadata.
+Use the most recent relevant draft_id.
 
 ========================================================
 REJECT
@@ -257,12 +378,16 @@ REJECT
 "Reject draft 15"
 
 {{
-    "draft_id": 15
+    "needs_tool": true,
+    "tool_name": "reject_draft",
+    "tool_arguments": {{
+        "draft_id": 15
+    }}
 }}
 
 "Reject it"
 
-Use the draft_id from structured conversation metadata.
+Use the most recent relevant draft_id.
 
 ========================================================
 SAVE
@@ -271,12 +396,16 @@ SAVE
 "Save draft 15"
 
 {{
-    "draft_id": 15
+    "needs_tool": true,
+    "tool_name": "save_draft",
+    "tool_arguments": {{
+        "draft_id": 15
+    }}
 }}
 
 "Save it"
 
-Use structured conversation metadata.
+Use the most recent relevant draft_id.
 
 ========================================================
 UPDATE
@@ -285,7 +414,11 @@ UPDATE
 "Update draft 15"
 
 {{
-    "draft_id": 15
+    "needs_tool": true,
+    "tool_name": "update_draft",
+    "tool_arguments": {{
+        "draft_id": 15
+    }}
 }}
 
 ========================================================
@@ -295,24 +428,38 @@ SEND
 "Send draft 15"
 
 {{
-    "draft_id": 15
+    "needs_tool": true,
+    "tool_name": "send_reply",
+    "tool_arguments": {{
+        "draft_id": 15
+    }}
 }}
 
 "Send it"
 
-Use structured conversation metadata.
+Use the most recent relevant draft_id.
 
 ========================================================
 ID RULE
 ========================================================
 
-Priority:
+Current user message has highest priority.
 
-1. Current user message
-2. Structured conversation metadata
-3. No ID
+For example:
 
-If no ID can be resolved:
+Previous context:
+draft_id = 40
+
+User:
+"Send draft 55"
+
+Use:
+
+draft_id = 55
+
+Never let old context override an explicit current ID.
+
+If no ID can be resolved for an action that requires one:
 
 needs_clarification = true
 
@@ -406,16 +553,45 @@ format_instructions
             ]
         )
 
-    # ------------------------------------------------------
-    # Structured context extraction
-    # ------------------------------------------------------
+    # ======================================================
+    # STRUCTURED CONTEXT EXTRACTION
+    # ======================================================
 
     @staticmethod
     def _get_context_ids(
         conversation: list[dict[str, Any]],
     ) -> dict[str, Any]:
 
+        """
+        Extract the most recent relevant draft/email context.
+
+        Important:
+        We scan newest → oldest.
+
+        A single recent assistant tool result is preferred
+        over combining unrelated IDs from different messages.
+
+        Example:
+
+            generate_reply
+                email_id=25
+                draft_id=40
+
+        becomes:
+
+            {
+                "tool": "generate_reply",
+                "draft_id": 40,
+                "email_id": 25
+            }
+        """
+
         context: dict[str, Any] = {}
+
+        # --------------------------------------------------
+        # First pass:
+        # Find the newest structured tool/action metadata.
+        # --------------------------------------------------
 
         for message in reversed(conversation):
 
@@ -424,37 +600,84 @@ format_instructions
             if not isinstance(metadata, dict):
                 continue
 
-            if (
-                "draft_id" not in context
-                and metadata.get("draft_id") is not None
-            ):
-                context["draft_id"] = metadata["draft_id"]
+            tool = metadata.get(
+                "tool"
+            ) or metadata.get(
+                "action"
+            )
+
+            draft_id = metadata.get(
+                "draft_id"
+            )
+
+            email_id = metadata.get(
+                "email_id"
+            )
 
             if (
-                "email_id" not in context
-                and metadata.get("email_id") is not None
+                tool is not None
+                or draft_id is not None
+                or email_id is not None
             ):
-                context["email_id"] = metadata["email_id"]
 
-            if (
-                "tool" not in context
-                and metadata.get("tool")
-            ):
-                context["tool"] = metadata["tool"]
+                context["tool"] = tool
 
-            # We have enough context.
-            if (
-                "draft_id" in context
-                and "email_id" in context
-                and "tool" in context
-            ):
+                if draft_id is not None:
+                    context["draft_id"] = draft_id
+
+                if email_id is not None:
+                    context["email_id"] = email_id
+
+                # This is the most recent relevant context.
                 break
+
+        # --------------------------------------------------
+        # Second pass:
+        # Fill missing fields from older metadata only.
+        #
+        # This avoids mixing newer IDs over an already
+        # identified current object.
+        # --------------------------------------------------
+
+        if (
+            "draft_id" not in context
+            or "email_id" not in context
+        ):
+
+            for message in reversed(conversation):
+
+                metadata = message.get("metadata")
+
+                if not isinstance(metadata, dict):
+                    continue
+
+                if (
+                    "draft_id" not in context
+                    and metadata.get("draft_id") is not None
+                ):
+                    context["draft_id"] = (
+                        metadata["draft_id"]
+                    )
+
+                if (
+                    "email_id" not in context
+                    and metadata.get("email_id") is not None
+                ):
+                    context["email_id"] = (
+                        metadata["email_id"]
+                    )
+
+                if (
+                    "draft_id" in context
+                    and "email_id" in context
+                ):
+                    break
 
         return context
 
-    # ------------------------------------------------------
-    # Explicit ID extraction
-    # ------------------------------------------------------
+    # ======================================================
+    # EXPLICIT ID EXTRACTION
+    # ======================================================
 
     @staticmethod
     def _extract_explicit_ids(
@@ -487,9 +710,9 @@ format_instructions
 
         return ids
 
-    # ------------------------------------------------------
-    # Plan
-    # ------------------------------------------------------
+    # ======================================================
+    # PLAN
+    # ======================================================
 
     async def plan(
         self,
@@ -499,9 +722,9 @@ format_instructions
 
         conversation = conversation or []
 
-        # ======================================================
-        # 1. BUILD CONTEXT BEFORE LLM
-        # ======================================================
+        # ==================================================
+        # 1. EXTRACT CONVERSATIONAL CONTEXT
+        # ==================================================
 
         context = self._get_context_ids(
             conversation
@@ -511,13 +734,27 @@ format_instructions
             question
         )
 
+        logger.debug(
+            "Planner context: %s",
+            context,
+        )
+
+        logger.debug(
+            "Explicit IDs: %s",
+            explicit_ids,
+        )
+
+        # ==================================================
+        # 2. BUILD HISTORY
+        # ==================================================
+
         history_str = (
             "No previous conversation history."
         )
 
         if conversation:
 
-            history_parts = []
+            history_parts: list[str] = []
 
             for message in conversation:
 
@@ -554,9 +791,9 @@ format_instructions
                 history_parts
             )
 
-        # ======================================================
-        # 2. CALL LLM
-        # ======================================================
+        # ==================================================
+        # 3. CALL LLM
+        # ==================================================
 
         llm_instance = get_llm()
 
@@ -594,9 +831,9 @@ format_instructions
                 ),
             )
 
-        # ======================================================
-        # 3. NORMALIZE BASIC PLAN STATE
-        # ======================================================
+        # ==================================================
+        # 4. BASIC NORMALIZATION
+        # ==================================================
 
         plan.reasoning = (
             plan.reasoning or ""
@@ -606,13 +843,16 @@ format_instructions
             plan.tool_arguments or {}
         )
 
-        # ======================================================
-        # 4. NORMALIZE SEMANTIC FIELDS
-        # ======================================================
+        # ==================================================
+        # 5. SEMANTIC NORMALIZATION
+        # ==================================================
 
         if not plan.semantic_query:
+
             plan.semantic_query = question
+
         else:
+
             plan.semantic_query = (
                 plan.semantic_query.strip()
             )
@@ -683,9 +923,9 @@ format_instructions
         ):
             plan.sort_by = "date"
 
-        # ======================================================
-        # 5. NORMALIZE TOOL NAME
-        # ======================================================
+        # ==================================================
+        # 6. VALIDATE / NORMALIZE TOOL
+        # ==================================================
 
         valid_tools = {
             "search_emails",
@@ -714,56 +954,48 @@ format_instructions
                 plan.tool_name = None
                 plan.tool_arguments = {}
 
-        # ======================================================
-        # 6. RESOLVE EXPLICIT IDS
+        # ==================================================
+        # 7. RESOLVE IDs
         #
-        # Priority:
-        #
-        # Current user message
-        #        ↓
-        # Conversation metadata
-        #        ↓
-        # LLM output
-        #
-        # Explicit user IDs should always win.
-        # ======================================================
+        # Explicit current-message IDs ALWAYS win.
+        # ==================================================
 
         for key, value in explicit_ids.items():
 
             plan.tool_arguments[key] = value
 
-        # Only use conversation context if the current
-        # request did not explicitly provide the ID.
+        # --------------------------------------------------
+        # Draft context
+        # --------------------------------------------------
 
         if (
             "draft_id" not in plan.tool_arguments
             and context.get("draft_id") is not None
         ):
+
             plan.tool_arguments["draft_id"] = (
                 context["draft_id"]
             )
+
+        # --------------------------------------------------
+        # Email context
+        # --------------------------------------------------
 
         if (
             "email_id" not in plan.tool_arguments
             and context.get("email_id") is not None
         ):
+
             plan.tool_arguments["email_id"] = (
                 context["email_id"]
             )
 
-        # ======================================================
-        # 7. NORMALIZE STRING IDs
+        # ==================================================
+        # 8. NORMALIZE IDS
         #
-        # THIS MUST HAPPEN BEFORE REQUIRED ARGUMENT
-        # VALIDATION.
-        #
-        # Examples:
-        #
-        # "15"       -> 15
-        # "Draft 15" -> 15
-        # "draft_id: 15" -> 15
-        # "Email 10" -> 10
-        # ======================================================
+        # IMPORTANT:
+        # This happens BEFORE required validation.
+        # ==================================================
 
         for key in (
             "email_id",
@@ -777,24 +1009,25 @@ format_instructions
             if value is None:
                 continue
 
+            # bool must not be accepted as an integer ID.
             if isinstance(value, bool):
-                # bool is technically an int in Python,
-                # but must never be accepted as an ID.
+
                 plan.tool_arguments.pop(
                     key,
                     None,
                 )
+
                 continue
 
             if isinstance(value, int):
 
-                if value > 0:
-                    continue
+                if value <= 0:
 
-                plan.tool_arguments.pop(
-                    key,
-                    None,
-                )
+                    plan.tool_arguments.pop(
+                        key,
+                        None,
+                    )
+
                 continue
 
             if isinstance(value, str):
@@ -827,10 +1060,6 @@ format_instructions
 
                 else:
 
-                    # No numeric ID could be extracted.
-                    # Leave the argument missing so the
-                    # required-argument validation below
-                    # can trigger clarification.
                     plan.tool_arguments.pop(
                         key,
                         None,
@@ -838,15 +1067,14 @@ format_instructions
 
             else:
 
-                # Unsupported ID type.
                 plan.tool_arguments.pop(
                     key,
                     None,
                 )
 
-        # ======================================================
-        # 8. NORMALIZE TONE
-        # ======================================================
+        # ==================================================
+        # 9. NORMALIZE TONE
+        # ==================================================
 
         if plan.tool_name == "generate_reply":
 
@@ -855,22 +1083,25 @@ format_instructions
             )
 
             if tone is None:
+
                 tone = "professional"
 
             else:
-                tone = str(tone).strip().lower()
+
+                tone = (
+                    str(tone)
+                    .strip()
+                    .lower()
+                )
 
                 if not tone:
                     tone = "professional"
 
             plan.tool_arguments["tone"] = tone
 
-        # ======================================================
-        # 9. NORMALIZE REWRITE INSTRUCTION
-        #
-        # This happens before required-argument validation
-        # because instruction is required for rewrite_reply.
-        # ======================================================
+        # ==================================================
+        # 10. NORMALIZE REWRITE INSTRUCTION
+        # ==================================================
 
         if plan.tool_name == "rewrite_reply":
 
@@ -886,6 +1117,8 @@ format_instructions
                     instruction
                 ).strip()
 
+            # If LLM did not provide instruction,
+            # current user request becomes the instruction.
             if not instruction:
 
                 instruction = question.strip()
@@ -903,12 +1136,9 @@ format_instructions
                     None,
                 )
 
-        # ======================================================
-        # 10. REQUIRED ARGUMENT DEFINITIONS
-        #
-        # IMPORTANT:
-        # This is AFTER ID NORMALIZATION.
-        # ======================================================
+        # ==================================================
+        # 11. REQUIRED ARGUMENTS
+        # ==================================================
 
         required_tool_arguments = {
 
@@ -951,11 +1181,9 @@ format_instructions
             ],
         }
 
-        # ======================================================
-        # 11. VALIDATE REQUIRED ARGUMENTS
-        #
-        # NOW values like "Draft 15" have already become 15.
-        # ======================================================
+        # ==================================================
+        # 12. VALIDATE REQUIRED ARGUMENTS
+        # ==================================================
 
         if plan.needs_tool:
 
@@ -966,7 +1194,7 @@ format_instructions
                 )
             )
 
-            missing = []
+            missing: list[str] = []
 
             for argument in required:
 
@@ -979,6 +1207,7 @@ format_instructions
                 if value is None:
 
                     missing.append(argument)
+
                     continue
 
                 if (
@@ -989,7 +1218,7 @@ format_instructions
                     missing.append(argument)
 
             # ==================================================
-            # 12. CLARIFICATION
+            # 13. CLARIFICATION
             # ==================================================
 
             if missing:
@@ -1001,10 +1230,20 @@ format_instructions
                     == "rewrite_reply"
                 ):
 
-                    plan.clarification_message = (
-                        "I need a draft ID to rewrite. "
-                        "Please specify the draft."
-                    )
+                    if "draft_id" in missing:
+
+                        plan.clarification_message = (
+                            "I need a draft ID to rewrite. "
+                            "Please specify the draft or "
+                            "tell me which draft you mean."
+                        )
+
+                    else:
+
+                        plan.clarification_message = (
+                            "What would you like me to "
+                            "change in the draft?"
+                        )
 
                 elif (
                     plan.tool_name
@@ -1027,14 +1266,11 @@ format_instructions
                 # Never execute an incomplete tool call.
                 plan.needs_tool = False
                 plan.tool_name = None
-
-                # Keep the clarification state, but don't
-                # pass incomplete arguments to the executor.
                 plan.tool_arguments = {}
 
-        # ======================================================
-        # 13. FINAL PLAN
-        # ======================================================
+        # ==================================================
+        # 14. FINAL LOGGING
+        # ==================================================
 
         logger.debug(
             "Final normalized QueryPlan: %s",
