@@ -152,118 +152,55 @@ class GmailActionService:
     # =========================================================
 
     async def save_draft(
-        self,
-        draft_id: int,
-        user_id: int,
-    ) -> dict[str, Any]:
+    self,
+    draft_id: int,
+    user_id: int,
+) -> dict[str, Any]:
         """
-        Save the current DB draft to Gmail.
+    Save the current DB draft to Gmail.
 
-        This creates a Gmail Draft but does NOT send it.
+    Lifecycle:
 
-        After success:
+        No gmail_draft_id
+            ↓
+        Create Gmail draft
 
-            draft.gmail_draft_id = Gmail draft ID
-        """
+        Existing gmail_draft_id
+            ↓
+        Update existing Gmail draft
 
-        draft = self._load_draft(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
-
-        email = self._load_email(
-            email_id=draft.email_id,
-            user_id=user_id,
-        )
-
-        gmail = await self._get_gmail_service(
-            user_id=user_id,
-        )
-
-        gmail_result = await gmail.create_draft(
-            to=email.sender,
-            subject=f"Re: {email.subject}",
-            body=draft.draft,
-            thread_id=email.gmail_thread_id,
-        )
-
-        gmail_draft_id = gmail_result.get(
-            "id"
-        )
-
-        if not gmail_draft_id:
-            raise ValueError(
-                "Gmail did not return a draft ID."
-            )
-
-        draft.gmail_draft_id = gmail_draft_id
-
-        self.db.commit()
-        self.db.refresh(draft)
-
-        logger.info(
-            "Draft %s saved to Gmail. Gmail draft ID=%s",
-            draft.id,
-            gmail_draft_id,
-        )
-
-        return {
-            "success": True,
-            "draft_id": draft.id,
-            "gmail_draft_id": gmail_draft_id,
-            "message": (
-                f"Draft {draft.id} saved to Gmail."
-            ),
-        }
+    Never create duplicate Gmail drafts.
+    """
 
     # =========================================================
-    # UPDATE GMAIL DRAFT
+    # LOAD + OWNERSHIP
     # =========================================================
 
-    async def update_draft(
-        self,
-        draft_id: int,
-        user_id: int,
-    ) -> dict[str, Any]:
-        """
-        Synchronize the DB draft with Gmail.
-
-        If no Gmail draft exists:
-            create one.
-
-        If Gmail draft exists:
-            update it.
-        """
-
         draft = self._load_draft(
-            draft_id=draft_id,
-            user_id=user_id,
-        )
+        draft_id=draft_id,
+        user_id=user_id,
+    )
 
         email = self._load_email(
-            email_id=draft.email_id,
-            user_id=user_id,
-        )
+        email_id=draft.email_id,
+        user_id=user_id,
+    )
 
-        # -----------------------------------------------------
-        # No Gmail draft exists yet.
-        # -----------------------------------------------------
-
-        if not draft.gmail_draft_id:
-            return await self.save_draft(
-                draft_id=draft_id,
-                user_id=user_id,
-            )
-
-        # -----------------------------------------------------
-        # Update existing Gmail draft.
-        # -----------------------------------------------------
+    # =========================================================
+    # GMAIL SERVICE
+    # =========================================================
 
         gmail = await self._get_gmail_service(
-            user_id=user_id,
-        )
+        user_id=user_id,
+    )
 
-        gmail_result = await gmail.update_draft(
+    # =========================================================
+    # EXISTING GMAIL DRAFT
+    # =========================================================
+
+        if draft.gmail_draft_id:
+
+            gmail_result = await gmail.update_draft(
             draft_id=draft.gmail_draft_id,
             to=email.sender,
             subject=f"Re: {email.subject}",
@@ -271,30 +208,188 @@ class GmailActionService:
             thread_id=email.gmail_thread_id,
         )
 
-        updated_gmail_draft_id = gmail_result.get(
+            gmail_draft_id = gmail_result.get(
             "id",
             draft.gmail_draft_id,
         )
 
-        draft.gmail_draft_id = updated_gmail_draft_id
+            draft.gmail_draft_id = gmail_draft_id
+
+            self.db.commit()
+            self.db.refresh(draft)
+
+            logger.info(
+            "Updated existing Gmail draft %s "
+            "from DB draft %s.",
+            gmail_draft_id,
+            draft.id,
+        )
+
+            return {
+            "success": True,
+            "draft_id": draft.id,
+            "gmail_draft_id": gmail_draft_id,
+            "status": "saved",
+            "message": "Draft saved to Gmail.",
+        }
+
+    # =========================================================
+    # NO GMAIL DRAFT YET → CREATE ONE
+    # =========================================================
+
+        gmail_result = await gmail.create_draft(
+        to=email.sender,
+        subject=f"Re: {email.subject}",
+        body=draft.draft,
+        thread_id=email.gmail_thread_id,
+    )
+
+        gmail_draft_id = gmail_result.get("id")
+
+        if not gmail_draft_id:
+            raise ValueError(
+            "Gmail did not return a draft ID."
+        )
+
+        draft.gmail_draft_id = gmail_draft_id
 
         self.db.commit()
         self.db.refresh(draft)
 
         logger.info(
-            "Updated Gmail draft %s from DB draft %s.",
-            updated_gmail_draft_id,
+        "Created Gmail draft %s "
+        "from DB draft %s.",
+        gmail_draft_id,
+        draft.id,
+    )
+
+        return {
+        "success": True,
+        "draft_id": draft.id,
+        "gmail_draft_id": gmail_draft_id,
+        "status": "saved",
+        "message": "Draft saved to Gmail.",
+    }
+
+    # =========================================================
+    # UPDATE GMAIL DRAFT
+    # =========================================================
+
+    async def update_draft(
+    self,
+    draft_id: int,
+    user_id: int,
+) -> dict[str, Any]:
+        """
+    Synchronize the current DB draft with Gmail.
+
+    Existing Gmail draft:
+        DB draft
+            ↓
+        Gmail UPDATE
+
+    No Gmail draft:
+        DB draft
+            ↓
+        Gmail CREATE
+    """
+
+    # =========================================================
+    # LOAD DB DRAFT + OWNERSHIP
+    # =========================================================
+
+        draft = self._load_draft(
+        draft_id=draft_id,
+        user_id=user_id,
+    )
+
+        email = self._load_email(
+        email_id=draft.email_id,
+        user_id=user_id,
+    )
+
+    # =========================================================
+    # GET GMAIL SERVICE
+    # =========================================================
+
+        gmail = await self._get_gmail_service(
+        user_id=user_id,
+    )
+
+    # =========================================================
+    # EXISTING GMAIL DRAFT → UPDATE
+    # =========================================================
+
+        if draft.gmail_draft_id:
+
+            gmail_result = await gmail.update_draft(
+            draft_id=draft.gmail_draft_id,
+            to=email.sender,
+            subject=f"Re: {email.subject}",
+            body=draft.draft,
+            thread_id=email.gmail_thread_id,
+        )
+
+            gmail_draft_id = gmail_result.get(
+            "id",
+            draft.gmail_draft_id,
+        )
+
+            draft.gmail_draft_id = gmail_draft_id
+
+            self.db.commit()
+            self.db.refresh(draft)
+
+            logger.info(
+            "Updated Gmail draft %s "
+            "from DB draft %s.",
+            gmail_draft_id,
             draft.id,
         )
 
-        return {
+            return {
             "success": True,
             "draft_id": draft.id,
-            "gmail_draft_id": updated_gmail_draft_id,
-            "message": (
-                f"Draft {draft.id} updated in Gmail."
-            ),
+            "gmail_draft_id": gmail_draft_id,
+            "status": "updated",
         }
+
+    # =========================================================
+    # NO GMAIL DRAFT → CREATE
+    # =========================================================
+
+        gmail_result = await gmail.create_draft(
+        to=email.sender,
+        subject=f"Re: {email.subject}",
+        body=draft.draft,
+        thread_id=email.gmail_thread_id,
+    )
+
+        gmail_draft_id = gmail_result.get("id")
+
+        if not gmail_draft_id:
+            raise ValueError(
+            "Gmail did not return a draft ID."
+        )
+
+        draft.gmail_draft_id = gmail_draft_id
+
+        self.db.commit()
+        self.db.refresh(draft)
+
+        logger.info(
+        "Created Gmail draft %s "
+        "from DB draft %s.",
+        gmail_draft_id,
+        draft.id,
+    )
+
+        return {
+        "success": True,
+        "draft_id": draft.id,
+        "gmail_draft_id": gmail_draft_id,
+        "status": "updated",
+    }
 
     # =========================================================
     # SEND REPLY

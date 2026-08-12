@@ -1,5 +1,7 @@
-from backend.app.tools.base_tool import BaseTool
+from __future__ import annotations
+
 from backend.app.services.gmail_action_service import GmailActionService
+from backend.app.tools.base_tool import BaseTool
 
 
 class UpdateDraftTool(BaseTool):
@@ -10,17 +12,13 @@ class UpdateDraftTool(BaseTool):
         self,
         **kwargs,
     ):
-        draft_id = kwargs.get(
-            "draft_id"
-        )
+        # =====================================================
+        # VALIDATE INPUT
+        # =====================================================
 
-        user_id = kwargs.get(
-            "user_id"
-        )
-
-        db = kwargs.get(
-            "db"
-        )
+        draft_id = kwargs.get("draft_id")
+        user_id = kwargs.get("user_id")
+        db = kwargs.get("db")
 
         if draft_id is None:
             raise ValueError(
@@ -37,11 +35,23 @@ class UpdateDraftTool(BaseTool):
                 "Database session missing."
             )
 
-        service = GmailActionService(
-            db=db,
-        )
+        # =====================================================
+        # UPDATE / CREATE GMAIL DRAFT
+        # =====================================================
 
-        return await service.update_draft(
+        service = GmailActionService(db)
+
+        result = await service.update_draft(
             draft_id=draft_id,
             user_id=user_id,
         )
+
+        # =====================================================
+        # FRONTEND RESPONSE
+        # =====================================================
+
+        return {
+            "draft_id": result["draft_id"],
+            "gmail_draft_id": result["gmail_draft_id"],
+            "status": "updated",
+        }
