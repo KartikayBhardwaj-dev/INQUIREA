@@ -271,27 +271,43 @@ if (
   // APPROVE
   // ----------------------------------------------------------
 
-  if (tool === "approve_draft") {
+  // ----------------------------------------------------------
+// APPROVE
+// ----------------------------------------------------------
 
-    return {
-      ...previous,
+if (tool === "approve_draft") {
 
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
+  return {
+    ...previous,
 
-      approval_status:
-        DRAFT_STATUS.APPROVED,
+    draft_id:
+      firstDefined(
+        toolResult.draft_id,
+        toolResult.draftId,
+        previous.draft_id
+      ),
 
-      is_sent: false,
+    approval_status:
+      normalizeStatus(
+        toolResult.approval_status ??
+        toolResult.status
+      ) ??
+      DRAFT_STATUS.APPROVED,
 
-      sent_at: null,
-    };
-  }
+    is_sent:
+      Boolean(
+        toolResult.is_sent ??
+        false
+      ),
 
+    sent_at:
+      firstDefined(
+        toolResult.sent_at,
+        toolResult.sentAt,
+        null
+      ),
+  };
+}
 
   // ----------------------------------------------------------
   // REJECT

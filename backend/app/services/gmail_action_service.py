@@ -474,18 +474,26 @@ class GmailActionService:
             # -------------------------------------------------
 
             self._update_after_send(
-                draft=draft,
-                user_id=user_id,
-                gmail_message_id=gmail_message_id,
-            )
+    draft=draft,
+    user_id=user_id,
+    gmail_message_id=gmail_message_id,
+)
+
+# -------------------------------------------------
+# DB state is now prepared successfully.
+# Caller owns the transaction, so commit here.
+# -------------------------------------------------
+
+            self.db.commit()
+            self.db.refresh(draft)
 
             logger.info(
-                "Draft %s sent successfully by user %s. "
-                "Gmail message ID=%s",
-                draft_id,
-                user_id,
-                gmail_message_id,
-            )
+    "Draft %s sent successfully by user %s. "
+    "Gmail message ID=%s",
+    draft_id,
+    user_id,
+    gmail_message_id,
+)
 
             return {
                 "success": True,
@@ -535,43 +543,53 @@ class GmailActionService:
     # AFTER SEND
     # =========================================================
 
+# =========================================================
+# AFTER SEND
+# =========================================================
+
     def _update_after_send(
-        self,
-        draft: DraftReply,
-        user_id: int,
-        gmail_message_id: str,
-    ) -> None:
+    self,
+    draft: DraftReply,
+    user_id: int,
+    gmail_message_id: str,
+) -> None:
         """
-        Persist successful Gmail send state.
+    Persist successful Gmail send state.
 
-        This method does NOT call commit itself.
+    IMPORTANT:
+    This method does NOT commit.
 
-        The caller owns the transaction.
-        """
+    The caller owns the transaction.
+
+    Gmail send succeeds
+        ↓
+    update DB state
+        ↓
+    flush()
+        ↓
+    caller commits
+    """
 
         if draft.user_id != user_id:
             raise ValueError(
-                "You do not own this draft."
-            )
+            "You do not own this draft."
+        )
 
         draft.is_sent = True
         draft.gmail_message_id = gmail_message_id
         draft.sent_at = datetime.utcnow()
         draft.is_current = False
 
-        # Flush only.
-        #
-        # send_reply() owns the transaction and commits after
-        # this succeeds.
+    # Flush only.
+    #
+    # send_reply() owns the transaction and
+    # performs the final commit.
         self.db.flush()
 
-        self.db.commit()
-        self.db.refresh(draft)
-
         logger.info(
-            "Persisted sent state for Draft %s. "
-            "Gmail message ID=%s sent_at=%s",
-            draft.id,
-            draft.gmail_message_id,
-            draft.sent_at,
-        )
+        "Prepared sent state for Draft %s. "
+        "Gmail message ID=%s sent_at=%s",
+        draft.id,
+        draft.gmail_message_id,
+        draft.sent_at,
+    )
