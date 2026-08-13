@@ -1,11 +1,11 @@
 "use client";
 
-import {
-  useState,
-} from "react";
+import { useState } from "react";
 
 import MarkdownRenderer from "@/components/MarkdownRenderer";
+
 import EmailCard from "./EmailCard";
+import ChatActionRenderer from "./ChatActionRenderer";
 
 
 export default function ChatMessage({
@@ -13,11 +13,9 @@ export default function ChatMessage({
   onOpenEmail,
   onReplyEmail,
   onRegenerate,
-  messageIndex,
 }) {
   const isUser =
     message.role === "user";
-
 
   const [
     copied,
@@ -65,6 +63,7 @@ export default function ChatMessage({
     <div className="px-4 py-4 sm:px-8">
       <div className="mx-auto max-w-5xl">
         <div className="flex items-start gap-3">
+
           {/* AI ICON */}
 
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-xs font-bold text-black shadow-sm">
@@ -73,23 +72,57 @@ export default function ChatMessage({
 
 
           <div className="min-w-0 flex-1">
-            {/* CONTENT */}
 
-            <div className="text-sm leading-7 text-white/80">
-              <MarkdownRenderer>
-                {message.content || ""}
-              </MarkdownRenderer>
-            </div>
+            {/* ----------------------------------------------------------
+                AI TEXT RESPONSE
+                ---------------------------------------------------------- */}
+
+            {message.content && (
+              <div className="text-sm leading-7 text-white/80">
+                <MarkdownRenderer>
+                  {message.content}
+                </MarkdownRenderer>
+              </div>
+            )}
 
 
-            {/* RETRIEVED EMAILS */}
+            {/* ----------------------------------------------------------
+                STRUCTURED ACTION
+               
+                Task 29:
+                ChatMessage does NOT interpret:
+                  - tool
+                  - tool_result
+                  - draft_id
+                  - approval_status
+                  - sent status
+
+                useChat has already converted the backend
+                response into message.action.
+
+                ChatActionRenderer is responsible for
+                rendering the correct action UI.
+                ---------------------------------------------------------- */}
+
+            {message.action && (
+              <div className="mt-4">
+                <ChatActionRenderer
+                  action={message.action}
+                />
+              </div>
+            )}
+
+
+            {/* ----------------------------------------------------------
+                RETRIEVED EMAILS
+                ---------------------------------------------------------- */}
 
             {message.retrievedEmails?.length > 0 && (
               <div className="mt-5 space-y-3">
+
                 <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/35">
                   Relevant emails
                 </p>
-
 
                 {message.retrievedEmails.map(
                   (email, index) => (
@@ -100,27 +133,25 @@ export default function ChatMessage({
                         `${email.subject ?? "email"}-${index}`
                       }
                       email={email}
-                      onOpen={
-                        onOpenEmail
-                      }
-                      onReply={
-                        onReplyEmail
-                      }
+                      onOpen={onOpenEmail}
+                      onReply={onReplyEmail}
                     />
                   )
                 )}
+
               </div>
             )}
 
 
-            {/* ACTIONS */}
+            {/* ----------------------------------------------------------
+                MESSAGE ACTIONS
+                ---------------------------------------------------------- */}
 
             <div className="mt-3 flex items-center gap-1">
+
               <button
                 type="button"
-                onClick={
-                  handleCopy
-                }
+                onClick={handleCopy}
                 className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80"
               >
                 {copied
@@ -132,15 +163,15 @@ export default function ChatMessage({
               <button
                 type="button"
                 onClick={() =>
-                  onRegenerate?.(
-                    messageIndex
-                  )
+                  onRegenerate?.()
                 }
                 className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80"
               >
                 Regenerate
               </button>
+
             </div>
+
           </div>
         </div>
       </div>
