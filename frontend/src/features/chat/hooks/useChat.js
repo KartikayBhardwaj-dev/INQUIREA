@@ -13,6 +13,11 @@ import {
   getConversations,
 } from "../services/chat.service";
 
+import {
+  createEmptyDraftState,
+  applyDraftAction,
+} from "../state/draftState";
+
 
 function getConversationId(data) {
   return (
@@ -44,6 +49,58 @@ function getRetrievedEmails(data) {
     []
   );
 }
+
+
+/**
+ * Extract the structured tool result.
+ *
+ * IMPORTANT:
+ * Draft IDs and other structured action
+ * information must come from tool_result.
+ *
+ * Never parse them from `answer`.
+ */
+function getToolResult(data) {
+  return (
+    data?.tool_result ??
+    data?.toolResult ??
+    null
+  );
+}
+
+
+/**
+ * Apply a backend tool response to DraftState.
+ *
+ * Only tool actions that actually return a
+ * structured result are used here.
+ */
+function updateDraftFromResponse(
+  currentDraft,
+  data
+) {
+  const tool =
+    data?.tool ??
+    null;
+
+  const toolResult =
+    getToolResult(data);
+
+  if (
+    !tool ||
+    !toolResult ||
+    typeof toolResult !== "object"
+  ) {
+    return currentDraft;
+  }
+
+  return applyDraftAction(
+    currentDraft,
+    tool,
+    toolResult
+  );
+}
+
 
 function normalizeEmail(email) {
   if (!email) {
@@ -125,6 +182,7 @@ function normalizeEmail(email) {
   };
 }
 
+
 function normalizeAssistantMessage(
   data
 ) {
@@ -141,8 +199,28 @@ function normalizeAssistantMessage(
       getRetrievedEmails(data)
         .map(normalizeEmail)
         .filter(
-          (email) => email?.id != null
+          (email) =>
+            email?.id != null
         ),
+
+    /**
+     * Preserve structured tool information
+     * on the message as well.
+     *
+     * This means ChatMessage can later inspect
+     * the tool result without parsing answer.
+     */
+    tool:
+      data?.tool ??
+      null,
+
+    toolResult:
+      getToolResult(data),
+
+    queryPlan:
+      data?.query_plan ??
+      data?.queryPlan ??
+      null,
 
     timestamp:
       new Date().toISOString(),
@@ -209,11 +287,23 @@ export default function useChat() {
     setError,
   ] = useState(null);
 
+  /**
+   * SINGLE SOURCE OF TRUTH FOR CURRENT DRAFT
+   */
+  const [
+    draft,
+    setDraft,
+  ] = useState(
+    createEmptyDraftState()
+  );
+
 
   const loadConversations =
     useCallback(async () => {
       try {
-        setIsLoadingConversations(true);
+        setIsLoadingConversations(
+          true
+        );
 
         const data =
           await getConversations();
@@ -221,7 +311,8 @@ export default function useChat() {
         const list =
           Array.isArray(data)
             ? data
-            : data?.conversations ?? [];
+            : data?.conversations ??
+              [];
 
         setConversations(
           list.map(
@@ -312,6 +403,25 @@ export default function useChat() {
                     retrievedEmails:
                       emails,
 
+                    /**
+                     * Preserve structured backend
+                     * tool information when loading
+                     * existing conversations.
+                     */
+                    tool:
+                      message.tool ??
+                      null,
+
+                    toolResult:
+                      message.tool_result ??
+                      message.toolResult ??
+                      null,
+
+                    queryPlan:
+                      message.query_plan ??
+                      message.queryPlan ??
+                      null,
+
                     timestamp:
                       message.created_at ??
                       message.createdAt ??
@@ -322,6 +432,62 @@ export default function useChat() {
             );
 
           setMessages(normalized);
+
+          /**
+           * Recover the latest draft from
+           * conversation history.
+           *
+           * We walk backwards so the most recent
+           * tool result wins.
+           */
+          let recoveredDraft =
+            createEmptyDraftState();
+
+          for (
+            let index =
+              normalized.length - 1;
+            index >= 0;
+            index--
+          ) {
+            const message =
+              normalized[index];
+
+            if (
+              message.role !==
+              "assistant"
+            ) {
+              continue;
+            }
+
+            if (
+              !message.tool ||
+              !message.toolResult
+            ) {
+              continue;
+            }
+
+            recoveredDraft =
+              applyDraftAction(
+                recoveredDraft,
+                message.tool,
+                message.toolResult
+              );
+
+            /**
+             * Once we find the latest draft
+             * action, stop.
+             */
+            if (
+              message.toolResult
+                ?.draft_id != null
+            ) {
+              break;
+            }
+          }
+
+          setDraft(
+            recoveredDraft
+          );
 
           setActiveConversationId(
             conversationId
@@ -367,6 +533,12 @@ export default function useChat() {
           content: trimmed,
 
           retrievedEmails: [],
+
+          tool: null,
+
+          toolResult: null,
+
+          queryPlan: null,
 
           timestamp:
             new Date().toISOString(),
@@ -423,6 +595,18 @@ export default function useChat() {
             ]
           );
 
+          /**
+           * Update the SINGLE DraftState
+           * from the structured tool response.
+           */
+          setDraft(
+            (currentDraft) =>
+              updateDraftFromResponse(
+                currentDraft,
+                data
+              )
+          );
+
           await loadConversations();
         } catch (err) {
           console.error(
@@ -454,6 +638,14 @@ export default function useChat() {
       );
 
       setMessages([]);
+
+      /**
+       * New conversation means there is
+       * no active draft.
+       */
+      setDraft(
+        createEmptyDraftState()
+      );
 
       setError(null);
     }, []);
@@ -518,6 +710,11 @@ export default function useChat() {
     isLoadingConversations,
 
     error,
+
+    /**
+     * Centralized DraftState.
+     */
+    draft,
 
     sendMessage,
     loadConversation,
