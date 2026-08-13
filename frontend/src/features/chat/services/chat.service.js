@@ -1,6 +1,10 @@
 import api from "@/lib/axios";
 
 
+// ============================================================
+// Existing chat functions
+// ============================================================
+
 export async function createChat(
   message
 ) {
@@ -22,10 +26,25 @@ export async function continueChat(
 ) {
   const response =
     await api.post(
-      `/chat/${conversationId}`,
+      "/chat/continue",
       {
+        conversation_id:
+          conversationId,
+
         message,
       }
+    );
+
+  return response.data;
+}
+
+
+export async function getChatHistory(
+  conversationId
+) {
+  const response =
+    await api.get(
+      `/chat/${conversationId}`
     );
 
   return response.data;
@@ -42,33 +61,21 @@ export async function getConversations() {
 }
 
 
-export async function getChatHistory(
-  conversationId
+// ============================================================
+// TASK 31
+// Draft editing through chat
+// ============================================================
+
+export async function editDraft(
+  conversationId,
+  draftId,
+  content
 ) {
-  const response =
-    await api.get(
-      `/chat/history/${conversationId}`
-    );
+  const message =
+    `Update draft ${draftId} with: ${content}`;
 
-  return response.data;
-}
-
-
-export async function getEmailDetails(
-  gmailMessageId
-) {
-  if (!gmailMessageId) {
-    throw new Error(
-      "Missing Gmail message ID"
-    );
-  }
-
-  const response =
-    await api.get(
-      `/gmail/email/${encodeURIComponent(
-        gmailMessageId
-      )}`
-    );
-
-  return response.data;
+  return continueChat(
+    conversationId,
+    message
+  );
 }

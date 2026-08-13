@@ -24,7 +24,7 @@ import {
 
 
 // ============================================================
-// Backend response helpers
+// Backend helpers
 // ============================================================
 
 function getConversationId(data) {
@@ -60,10 +60,7 @@ function getRetrievedEmails(data) {
 
 
 function getTool(data) {
-  return (
-    data?.tool ??
-    null
-  );
+  return data?.tool ?? null;
 }
 
 
@@ -162,48 +159,29 @@ function normalizeEmail(email) {
 
 
 // ============================================================
-// Draft action application
+// Draft response application
 // ============================================================
 
-/**
- * Apply one backend action to the centralized DraftState.
- *
- * IMPORTANT:
- *
- * Components must NOT interpret:
- *
- *   tool
- *   tool_result
- *
- * themselves.
- *
- * All action → DraftState conversion happens here.
- */
 function updateDraftFromResponse(
   currentDraft,
   data
 ) {
   const tool = getTool(data);
 
-  const toolResult = getToolResult(data);
+  const toolResult =
+    getToolResult(data);
 
-  // No action.
   if (!tool) {
     return currentDraft;
   }
 
-  // Tool failed.
-  //
-  // A failed tool must never modify the current
-  // DraftState.
   if (
-    data?.error ||
-    data?.success === false
+    data?.success === false ||
+    data?.error
   ) {
     return currentDraft;
   }
 
-  // No structured result.
   if (
     !toolResult ||
     typeof toolResult !== "object"
@@ -227,17 +205,6 @@ function normalizeAssistantMessage(
   data,
   currentDraft
 ) {
-  const tool = getTool(data);
-
-  const toolResult =
-    getToolResult(data);
-
-  const action =
-    normalizeToolAction(
-      data,
-      currentDraft
-    );
-
   const retrievedEmails =
     getRetrievedEmails(data)
       .map(normalizeEmail)
@@ -257,19 +224,17 @@ function normalizeAssistantMessage(
 
     retrievedEmails,
 
-    // --------------------------------------------------------
-    // Structured action
-    // --------------------------------------------------------
+    tool:
+      getTool(data),
 
-    action,
+    toolResult:
+      getToolResult(data),
 
-    tool,
-
-    toolResult,
-
-    // --------------------------------------------------------
-    // Backend structured error
-    // --------------------------------------------------------
+    action:
+      normalizeToolAction(
+        data,
+        currentDraft
+      ),
 
     error:
       data?.error ??
@@ -324,10 +289,6 @@ function normalizeConversation(
 
 export default function useChat() {
 
-  // ----------------------------------------------------------
-  // Chat state
-  // ----------------------------------------------------------
-
   const [
     messages,
     setMessages,
@@ -359,11 +320,9 @@ export default function useChat() {
   ] = useState(null);
 
 
-  // ----------------------------------------------------------
-  // TASK 28
-  //
-  // Single source of truth for the active draft.
-  // ----------------------------------------------------------
+  // ==========================================================
+  // SINGLE DRAFT STATE
+  // ==========================================================
 
   const [
     draft,
@@ -374,7 +333,7 @@ export default function useChat() {
 
 
   // ==========================================================
-  // Load conversations
+  // Conversations
   // ==========================================================
 
   const loadConversations =
@@ -424,7 +383,7 @@ export default function useChat() {
 
 
   // ==========================================================
-  // Load existing conversation
+  // Load conversation
   // ==========================================================
 
   const loadConversation =
@@ -453,10 +412,6 @@ export default function useChat() {
                 [];
 
 
-          // --------------------------------------------------
-          // Normalize messages
-          // --------------------------------------------------
-
           const normalized =
             history.map(
               (message) => {
@@ -465,12 +420,6 @@ export default function useChat() {
                   message.role ??
                   message.sender ??
                   "assistant";
-
-                const content =
-                  message.content ??
-                  message.message ??
-                  message.text ??
-                  "";
 
                 const emails =
                   (
@@ -494,10 +443,6 @@ export default function useChat() {
                   message.toolResult ??
                   null;
 
-                const error =
-                  message.error ??
-                  null;
-
                 return {
                   id:
                     message.id ??
@@ -508,7 +453,11 @@ export default function useChat() {
                       ? "user"
                       : "assistant",
 
-                  content,
+                  content:
+                    message.content ??
+                    message.message ??
+                    message.text ??
+                    "",
 
                   retrievedEmails:
                     emails,
@@ -517,15 +466,6 @@ export default function useChat() {
 
                   toolResult,
 
-                  error,
-
-                  queryPlan:
-                    message.query_plan ??
-                    message.queryPlan ??
-                    null,
-
-                  // Recreate renderer action
-                  // from stored backend data.
                   action:
                     role === "assistant"
                       ? normalizeToolAction(
@@ -533,6 +473,15 @@ export default function useChat() {
                           null
                         )
                       : null,
+
+                  error:
+                    message.error ??
+                    null,
+
+                  queryPlan:
+                    message.query_plan ??
+                    message.queryPlan ??
+                    null,
 
                   timestamp:
                     message.created_at ??
@@ -543,22 +492,17 @@ export default function useChat() {
             );
 
 
-          setMessages(normalized);
+          setMessages(
+            normalized
+          );
 
 
-          // --------------------------------------------------
-          // TASK 28
-          //
-          // Reconstruct DraftState from the conversation.
-          //
-          // We replay successful draft actions in chronological
-          // order so the final state represents the current
-          // draft.
-          // --------------------------------------------------
+          // ----------------------------------------------------
+          // Replay tool actions
+          // ----------------------------------------------------
 
           let recoveredDraft =
             createEmptyDraftState();
-
 
           for (
             const message of normalized
@@ -571,19 +515,13 @@ export default function useChat() {
               continue;
             }
 
-            if (!message.tool) {
-              continue;
-            }
-
             if (
-              !message.toolResult ||
-              typeof message.toolResult !==
-                "object"
+              !message.tool ||
+              !message.toolResult
             ) {
               continue;
             }
 
-            // Failed actions must not mutate state.
             if (message.error) {
               continue;
             }
@@ -595,7 +533,6 @@ export default function useChat() {
                 message.toolResult
               );
           }
-
 
           setDraft(
             recoveredDraft
@@ -627,7 +564,7 @@ export default function useChat() {
 
 
   // ==========================================================
-  // Send message
+  // Generic chat request
   // ==========================================================
 
   const sendMessage =
@@ -641,15 +578,10 @@ export default function useChat() {
           !trimmed ||
           isLoading
         ) {
-          return;
+          return null;
         }
 
         setError(null);
-
-
-        // ----------------------------------------------------
-        // Add user message immediately
-        // ----------------------------------------------------
 
         const userMessage = {
           id:
@@ -666,16 +598,15 @@ export default function useChat() {
 
           toolResult: null,
 
-          error: null,
-
           action: null,
+
+          error: null,
 
           queryPlan: null,
 
           timestamp:
             new Date().toISOString(),
         };
-
 
         setMessages(
           (previous) => [
@@ -684,18 +615,11 @@ export default function useChat() {
           ]
         );
 
-
         setIsLoading(true);
-
 
         try {
 
           let data;
-
-
-          // --------------------------------------------------
-          // Backend request
-          // --------------------------------------------------
 
           if (
             activeConversationId
@@ -716,10 +640,6 @@ export default function useChat() {
           }
 
 
-          // --------------------------------------------------
-          // Conversation ID
-          // --------------------------------------------------
-
           const conversationId =
             getConversationId(data);
 
@@ -727,25 +647,19 @@ export default function useChat() {
             conversationId &&
             !activeConversationId
           ) {
-
             setActiveConversationId(
               conversationId
             );
           }
 
 
-          // --------------------------------------------------
-          // TASK 29
-          //
-          // Normalize backend action in ONE place.
-          // --------------------------------------------------
-
+          // Use current draft snapshot for
+          // action rendering.
           const assistantMessage =
             normalizeAssistantMessage(
               data,
               draft
             );
-
 
           setMessages(
             (previous) => [
@@ -755,15 +669,6 @@ export default function useChat() {
           );
 
 
-          // --------------------------------------------------
-          // TASK 28
-          //
-          // Update the single DraftState.
-          //
-          // This is the ONLY place where the active draft
-          // changes because of a chat action.
-          // --------------------------------------------------
-
           setDraft(
             (currentDraft) =>
               updateDraftFromResponse(
@@ -772,10 +677,6 @@ export default function useChat() {
               )
           );
 
-
-          // --------------------------------------------------
-          // Backend structured error
-          // --------------------------------------------------
 
           if (data?.error) {
 
@@ -788,6 +689,8 @@ export default function useChat() {
 
 
           await loadConversations();
+
+          return data;
 
         } catch (err) {
 
@@ -803,6 +706,8 @@ export default function useChat() {
               ?.error?.message ??
             "Something went wrong while talking to your inbox."
           );
+
+          return null;
 
         } finally {
 
@@ -820,6 +725,137 @@ export default function useChat() {
 
 
   // ==========================================================
+  // TASK 31 — Edit draft
+  // ==========================================================
+
+  const editDraft =
+    useCallback(
+      async (content) => {
+
+        if (!draft?.draft_id) {
+          setError(
+            "No active draft is available."
+          );
+          return;
+        }
+
+        const message =
+          `Update draft ${draft.draft_id} with: ${content}`;
+
+        await sendMessage(message);
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
+
+
+  // ==========================================================
+  // Regenerate draft
+  // ==========================================================
+
+  const regenerateDraft =
+    useCallback(
+      async () => {
+
+        if (!draft?.draft_id) {
+          setError(
+            "No active draft is available."
+          );
+          return;
+        }
+
+        await sendMessage(
+          `Regenerate draft ${draft.draft_id}`
+        );
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
+
+
+  // ==========================================================
+  // Approve draft
+  // ==========================================================
+
+  const approveDraft =
+    useCallback(
+      async () => {
+
+        if (!draft?.draft_id) {
+          setError(
+            "No active draft is available."
+          );
+          return;
+        }
+
+        await sendMessage(
+          `Approve draft ${draft.draft_id}`
+        );
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
+
+
+  // ==========================================================
+  // Reject draft
+  // ==========================================================
+
+  const rejectDraft =
+    useCallback(
+      async () => {
+
+        if (!draft?.draft_id) {
+          setError(
+            "No active draft is available."
+          );
+          return;
+        }
+
+        await sendMessage(
+          `Reject draft ${draft.draft_id}`
+        );
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
+
+
+  // ==========================================================
+  // Send draft
+  // ==========================================================
+
+  const sendDraft =
+    useCallback(
+      async () => {
+
+        if (!draft?.draft_id) {
+          setError(
+            "No active draft is available."
+          );
+          return;
+        }
+
+        await sendMessage(
+          `Send draft ${draft.draft_id}`
+        );
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
+
+
+  // ==========================================================
   // New conversation
   // ==========================================================
 
@@ -832,7 +868,6 @@ export default function useChat() {
 
       setMessages([]);
 
-      // New conversation = no active draft.
       setDraft(
         createEmptyDraftState()
       );
@@ -843,7 +878,7 @@ export default function useChat() {
 
 
   // ==========================================================
-  // Regenerate
+  // Regenerate AI message
   // ==========================================================
 
   const regenerate =
@@ -856,7 +891,6 @@ export default function useChat() {
         ) {
           return;
         }
-
 
         const previousUserMessage =
           [...messages]
@@ -871,13 +905,11 @@ export default function useChat() {
                 "user"
             );
 
-
         if (
           !previousUserMessage
         ) {
           return;
         }
-
 
         setMessages(
           (previous) =>
@@ -886,7 +918,6 @@ export default function useChat() {
               messageIndex
             )
         );
-
 
         await sendMessage(
           previousUserMessage.content
@@ -907,7 +938,6 @@ export default function useChat() {
 
   return {
 
-    // Chat
     messages,
     conversations,
 
@@ -918,28 +948,21 @@ export default function useChat() {
 
     error,
 
-
-    // --------------------------------------------------------
-    // TASK 28
-    // --------------------------------------------------------
-
-    /**
-     * Current centralized DraftState.
-     *
-     * Components should consume this instead of
-     * interpreting tool responses themselves.
-     */
+    // Centralized draft
     draft,
 
-
-    // --------------------------------------------------------
-    // Actions
-    // --------------------------------------------------------
-
+    // Chat
     sendMessage,
 
-    loadConversation,
+    // Draft actions
+    editDraft,
+    regenerateDraft,
+    approveDraft,
+    rejectDraft,
+    sendDraft,
 
+    // Conversation
+    loadConversation,
     newConversation,
 
     regenerate,

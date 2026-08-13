@@ -1,69 +1,33 @@
-export const DRAFT_STATUS = {
+// ============================================================
+// DraftState Model
+// ============================================================
+
+export const DRAFT_STATUS = Object.freeze({
   PENDING: "PENDING",
   APPROVED: "APPROVED",
   REJECTED: "REJECTED",
   SENT: "SENT",
-};
+});
 
 
-export function createDraftState(data = {}) {
+export function createEmptyDraftState() {
   return {
-    draft_id:
-      data.draft_id ??
-      data.draftId ??
-      null,
+    draft_id: null,
+    email_id: null,
 
-    email_id:
-      data.email_id ??
-      data.emailId ??
-      null,
+    content: "",
 
-    content:
-      data.content ??
-      data.body ??
-      data.text ??
-      "",
+    version: null,
 
-    version:
-      data.version ??
-      1,
-
-    tone:
-      data.tone ??
-      "professional",
+    tone: null,
 
     approval_status:
-      data.approval_status ??
-      data.approvalStatus ??
       DRAFT_STATUS.PENDING,
 
-    gmail_draft_id:
-      data.gmail_draft_id ??
-      data.gmailDraftId ??
-      null,
+    gmail_draft_id: null,
 
-    is_sent:
-      data.is_sent ??
-      data.isSent ??
-      false,
+    is_sent: false,
 
-    sent_at:
-      data.sent_at ??
-      data.sentAt ??
-      null,
-  };
-}
-
-
-export function updateDraftState(
-  currentDraft,
-  data = {}
-) {
-  return {
-    ...currentDraft,
-    ...createDraftState({
-      ...currentDraft,
-      ...data,
-    }),
+    sent_at: null,
   };
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import {
+  useState,
+} from "react";
 
 import MarkdownRenderer from "@/components/MarkdownRenderer";
 
@@ -10,12 +12,26 @@ import ChatActionRenderer from "./ChatActionRenderer";
 
 export default function ChatMessage({
   message,
+
+  draft,
+
+  onEditDraft,
+  onRegenerateDraft,
+  onApproveDraft,
+  onRejectDraft,
+  onSendDraft,
+
+  isDraftLoading,
+
   onOpenEmail,
   onReplyEmail,
   onRegenerate,
+  messageIndex,
 }) {
+
   const isUser =
     message.role === "user";
+
 
   const [
     copied,
@@ -24,7 +40,9 @@ export default function ChatMessage({
 
 
   async function handleCopy() {
+
     try {
+
       await navigator.clipboard.writeText(
         message.content ?? ""
       );
@@ -34,34 +52,40 @@ export default function ChatMessage({
       setTimeout(() => {
         setCopied(false);
       }, 1500);
+
     } catch {
       // Clipboard unavailable.
     }
   }
 
 
-  /* ----------------------------------------------------------------------
-     USER MESSAGE
-  ---------------------------------------------------------------------- */
+  // ============================================================
+  // USER
+  // ============================================================
 
   if (isUser) {
+
     return (
       <div className="flex justify-end px-4 py-2 sm:px-8">
+
         <div className="max-w-[min(720px,85%)] rounded-2xl rounded-br-md bg-white px-4 py-3 text-sm leading-6 text-black shadow-lg">
           {message.content}
         </div>
+
       </div>
     );
   }
 
 
-  /* ----------------------------------------------------------------------
-     AI MESSAGE
-  ---------------------------------------------------------------------- */
+  // ============================================================
+  // ASSISTANT
+  // ============================================================
 
   return (
     <div className="px-4 py-4 sm:px-8">
+
       <div className="mx-auto max-w-5xl">
+
         <div className="flex items-start gap-3">
 
           {/* AI ICON */}
@@ -73,59 +97,74 @@ export default function ChatMessage({
 
           <div className="min-w-0 flex-1">
 
-            {/* ----------------------------------------------------------
-                AI TEXT RESPONSE
-                ---------------------------------------------------------- */}
+            {/* ----------------------------------------------------
+                TEXT
+            ---------------------------------------------------- */}
 
             {message.content && (
               <div className="text-sm leading-7 text-white/80">
+
                 <MarkdownRenderer>
                   {message.content}
                 </MarkdownRenderer>
+
               </div>
             )}
 
 
-            {/* ----------------------------------------------------------
-                STRUCTURED ACTION
-               
-                Task 29:
-                ChatMessage does NOT interpret:
-                  - tool
-                  - tool_result
-                  - draft_id
-                  - approval_status
-                  - sent status
-
-                useChat has already converted the backend
-                response into message.action.
-
-                ChatActionRenderer is responsible for
-                rendering the correct action UI.
-                ---------------------------------------------------------- */}
+            {/* ----------------------------------------------------
+                DRAFT ACTION
+            ---------------------------------------------------- */}
 
             {message.action && (
-              <div className="mt-4">
-                <ChatActionRenderer
-                  action={message.action}
-                />
-              </div>
+              <ChatActionRenderer
+                action={message.action}
+
+                /*
+                 * IMPORTANT:
+                 *
+                 * Use the centralized current draft.
+                 * Do NOT use action.draft as the source of truth.
+                 */
+                draft={draft}
+
+                onEdit={onEditDraft}
+                onRegenerate={
+                  onRegenerateDraft
+                }
+                onApprove={
+                  onApproveDraft
+                }
+                onReject={
+                  onRejectDraft
+                }
+                onSend={
+                  onSendDraft
+                }
+
+                isLoading={
+                  isDraftLoading
+                }
+              />
             )}
 
 
-            {/* ----------------------------------------------------------
+            {/* ----------------------------------------------------
                 RETRIEVED EMAILS
-                ---------------------------------------------------------- */}
+            ---------------------------------------------------- */}
 
             {message.retrievedEmails?.length > 0 && (
+
               <div className="mt-5 space-y-3">
 
                 <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/35">
                   Relevant emails
                 </p>
 
+
                 {message.retrievedEmails.map(
                   (email, index) => (
+
                     <EmailCard
                       key={
                         email.id ??
@@ -133,9 +172,14 @@ export default function ChatMessage({
                         `${email.subject ?? "email"}-${index}`
                       }
                       email={email}
-                      onOpen={onOpenEmail}
-                      onReply={onReplyEmail}
+                      onOpen={
+                        onOpenEmail
+                      }
+                      onReply={
+                        onReplyEmail
+                      }
                     />
+
                   )
                 )}
 
@@ -143,9 +187,9 @@ export default function ChatMessage({
             )}
 
 
-            {/* ----------------------------------------------------------
+            {/* ----------------------------------------------------
                 MESSAGE ACTIONS
-                ---------------------------------------------------------- */}
+            ---------------------------------------------------- */}
 
             <div className="mt-3 flex items-center gap-1">
 
@@ -163,7 +207,9 @@ export default function ChatMessage({
               <button
                 type="button"
                 onClick={() =>
-                  onRegenerate?.()
+                  onRegenerate?.(
+                    messageIndex
+                  )
                 }
                 className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80"
               >
@@ -173,8 +219,11 @@ export default function ChatMessage({
             </div>
 
           </div>
+
         </div>
+
       </div>
+
     </div>
   );
 }

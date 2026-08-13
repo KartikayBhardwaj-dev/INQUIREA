@@ -1,31 +1,28 @@
-// features/chat/state/draftState.js
-
-export const DRAFT_STATUS = {
-  PENDING: "PENDING",
-  APPROVED: "APPROVED",
-  REJECTED: "REJECTED",
-  SENT: "SENT",
-};
+import {
+  DRAFT_STATUS,
+  createEmptyDraftState,
+} from "../models/draftState";
 
 
-export function createEmptyDraftState() {
-  return {
-    draft_id: null,
-    email_id: null,
-    content: "",
-    version: null,
-    tone: null,
-    approval_status: null,
-    gmail_draft_id: null,
-    is_sent: false,
-    sent_at: null,
-  };
+// ============================================================
+// Helpers
+// ============================================================
+
+function firstDefined(...values) {
+  for (const value of values) {
+    if (
+      value !== undefined &&
+      value !== null
+    ) {
+      return value;
+    }
+  }
+
+  return null;
 }
 
 
-export function normalizeApprovalStatus(
-  status
-) {
+function normalizeStatus(status) {
   if (!status) {
     return null;
   }
@@ -35,248 +32,340 @@ export function normalizeApprovalStatus(
       .trim()
       .toUpperCase();
 
-  switch (normalized) {
-    case DRAFT_STATUS.PENDING:
-      return DRAFT_STATUS.PENDING;
-
-    case DRAFT_STATUS.APPROVED:
-      return DRAFT_STATUS.APPROVED;
-
-    case DRAFT_STATUS.REJECTED:
-      return DRAFT_STATUS.REJECTED;
-
-    case DRAFT_STATUS.SENT:
-      return DRAFT_STATUS.SENT;
-
-    default:
-      return null;
-  }
-}
-
-
-export function normalizeDraftState(
-  data
-) {
   if (
-    !data ||
-    typeof data !== "object"
+    Object.values(DRAFT_STATUS).includes(
+      normalized
+    )
   ) {
-    return createEmptyDraftState();
+    return normalized;
   }
 
-  return {
-    draft_id:
-      data.draft_id ??
-      data.draftId ??
-      null,
-
-    email_id:
-      data.email_id ??
-      data.emailId ??
-      null,
-
-    content:
-      data.content ??
-      data.draft ??
-      "",
-
-    version:
-      data.version ??
-      null,
-
-    tone:
-      data.tone ??
-      null,
-
-    approval_status:
-      normalizeApprovalStatus(
-        data.approval_status ??
-        data.approvalStatus
-      ),
-
-    gmail_draft_id:
-      data.gmail_draft_id ??
-      data.gmailDraftId ??
-      null,
-
-    is_sent:
-      Boolean(
-        data.is_sent ??
-        data.isSent ??
-        false
-      ),
-
-    sent_at:
-      data.sent_at ??
-      data.sentAt ??
-      null,
-  };
+  return null;
 }
 
 
-/**
- * Merge a backend tool result into
- * the current DraftState.
- *
- * Existing information is preserved when
- * the backend action returns only a partial
- * result.
- */
-export function updateDraftState(
-  currentState,
-  data
-) {
-  const current =
-    currentState ??
-    createEmptyDraftState();
+// ============================================================
+// Apply backend action
+// ============================================================
 
-  const incoming =
-    normalizeDraftState(data);
-
-  return {
-    ...current,
-
-    draft_id:
-      incoming.draft_id ??
-      current.draft_id,
-
-    email_id:
-      incoming.email_id ??
-      current.email_id,
-
-    content:
-      incoming.content ||
-      current.content,
-
-    version:
-      incoming.version ??
-      current.version,
-
-    tone:
-      incoming.tone ??
-      current.tone,
-
-    approval_status:
-      incoming.approval_status ??
-      current.approval_status,
-
-    gmail_draft_id:
-      incoming.gmail_draft_id ??
-      current.gmail_draft_id,
-
-    is_sent:
-      incoming.is_sent ||
-      current.is_sent,
-
-    sent_at:
-      incoming.sent_at ??
-      current.sent_at,
-  };
-}
-
-
-/**
- * Apply a specific tool action.
- */
 export function applyDraftAction(
-  currentState,
-  action,
-  data = {}
+  currentDraft,
+  tool,
+  toolResult
 ) {
-  const current =
-    currentState ??
+  const previous =
+    currentDraft ??
     createEmptyDraftState();
 
-  const incoming =
-    normalizeDraftState(data);
-
-  switch (action) {
-    case "generate_reply":
-      return {
-        ...current,
-        ...updateDraftState(
-          current,
-          incoming
-        ),
-
-        approval_status:
-          incoming.approval_status ??
-          DRAFT_STATUS.PENDING,
-
-        is_sent: false,
-        sent_at: null,
-      };
-
-    case "rewrite_reply":
-    case "edit_draft":
-    case "update_draft":
-      return {
-        ...updateDraftState(
-          current,
-          incoming
-        ),
-
-        approval_status:
-          incoming.approval_status ??
-          DRAFT_STATUS.PENDING,
-
-        is_sent: false,
-        sent_at: null,
-      };
-
-    case "approve_draft":
-      return {
-        ...updateDraftState(
-          current,
-          incoming
-        ),
-
-        approval_status:
-          DRAFT_STATUS.APPROVED,
-
-        is_sent: false,
-      };
-
-    case "reject_draft":
-      return {
-        ...updateDraftState(
-          current,
-          incoming
-        ),
-
-        approval_status:
-          DRAFT_STATUS.REJECTED,
-
-        is_sent: false,
-      };
-
-    case "send_reply":
-      return {
-        ...updateDraftState(
-          current,
-          incoming
-        ),
-
-        approval_status:
-          DRAFT_STATUS.SENT,
-
-        is_sent: true,
-
-        sent_at:
-          incoming.sent_at ??
-          new Date().toISOString(),
-      };
-
-    case "save_draft":
-      return updateDraftState(
-        current,
-        incoming
-      );
-
-    default:
-      return updateDraftState(
-        current,
-        incoming
-      );
+  if (
+    !tool ||
+    !toolResult ||
+    typeof toolResult !== "object"
+  ) {
+    return previous;
   }
+
+
+  const next = {
+    ...previous,
+  };
+
+
+  // ----------------------------------------------------------
+  // GENERATE REPLY
+  // ----------------------------------------------------------
+
+  if (tool === "generate_reply") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId
+        ),
+
+      email_id:
+        firstDefined(
+          toolResult.email_id,
+          toolResult.emailId
+        ),
+
+      content:
+        firstDefined(
+          toolResult.content,
+          toolResult.draft_content,
+          toolResult.body,
+          ""
+        ),
+
+      version:
+        firstDefined(
+          toolResult.version,
+          1
+        ),
+
+      tone:
+        firstDefined(
+          toolResult.tone,
+          "professional"
+        ),
+
+      approval_status:
+        normalizeStatus(
+          toolResult.approval_status ??
+          toolResult.status
+        ) ??
+        DRAFT_STATUS.PENDING,
+
+      gmail_draft_id:
+        firstDefined(
+          toolResult.gmail_draft_id,
+          toolResult.gmailDraftId
+        ),
+
+      is_sent:
+        Boolean(
+          toolResult.is_sent ??
+          false
+        ),
+
+      sent_at:
+        firstDefined(
+          toolResult.sent_at,
+          toolResult.sentAt
+        ),
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // REWRITE REPLY
+  // ----------------------------------------------------------
+
+  if (tool === "rewrite_reply") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      email_id:
+        firstDefined(
+          toolResult.email_id,
+          toolResult.emailId,
+          previous.email_id
+        ),
+
+      content:
+        firstDefined(
+          toolResult.content,
+          toolResult.draft_content,
+          toolResult.body,
+          previous.content
+        ),
+
+      version:
+        firstDefined(
+          toolResult.version,
+          previous.version
+            ? previous.version + 1
+            : 1
+        ),
+
+      tone:
+        firstDefined(
+          toolResult.tone,
+          previous.tone
+        ),
+
+      approval_status:
+        DRAFT_STATUS.PENDING,
+
+      gmail_draft_id:
+        firstDefined(
+          toolResult.gmail_draft_id,
+          toolResult.gmailDraftId,
+          previous.gmail_draft_id
+        ),
+
+      is_sent: false,
+
+      sent_at: null,
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // EDIT DRAFT
+  // ----------------------------------------------------------
+
+  if (tool === "edit_draft") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      email_id:
+        firstDefined(
+          toolResult.email_id,
+          toolResult.emailId,
+          previous.email_id
+        ),
+
+      content:
+        firstDefined(
+          toolResult.content,
+          toolResult.draft_content,
+          toolResult.body,
+          previous.content
+        ),
+
+      version:
+        firstDefined(
+          toolResult.version,
+          previous.version
+            ? previous.version + 1
+            : 1
+        ),
+
+      approval_status:
+        DRAFT_STATUS.PENDING,
+
+      is_sent: false,
+
+      sent_at: null,
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // APPROVE
+  // ----------------------------------------------------------
+
+  if (tool === "approve_draft") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      approval_status:
+        DRAFT_STATUS.APPROVED,
+
+      is_sent: false,
+
+      sent_at: null,
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // REJECT
+  // ----------------------------------------------------------
+
+  if (tool === "reject_draft") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      approval_status:
+        DRAFT_STATUS.REJECTED,
+
+      is_sent: false,
+
+      sent_at: null,
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // SAVE
+  // ----------------------------------------------------------
+
+  if (tool === "save_draft") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      gmail_draft_id:
+        firstDefined(
+          toolResult.gmail_draft_id,
+          toolResult.gmailDraftId,
+          previous.gmail_draft_id
+        ),
+    };
+  }
+
+
+  // ----------------------------------------------------------
+  // SEND
+  // ----------------------------------------------------------
+
+  if (tool === "send_reply") {
+
+    return {
+      ...previous,
+
+      draft_id:
+        firstDefined(
+          toolResult.draft_id,
+          toolResult.draftId,
+          previous.draft_id
+        ),
+
+      approval_status:
+        DRAFT_STATUS.SENT,
+
+      is_sent: true,
+
+      sent_at:
+        firstDefined(
+          toolResult.sent_at,
+          toolResult.sentAt,
+          new Date().toISOString()
+        ),
+    };
+  }
+
+
+  // Unknown action → don't touch draft.
+  return next;
 }
+
+
+export {
+  DRAFT_STATUS,
+  createEmptyDraftState,
+};
