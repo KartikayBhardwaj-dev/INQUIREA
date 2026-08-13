@@ -655,27 +655,26 @@ export default function useChat() {
 
           // Use current draft snapshot for
           // action rendering.
-          const assistantMessage =
-            normalizeAssistantMessage(
-              data,
-              draft
-            );
+          const nextDraft =
+  updateDraftFromResponse(
+    draft,
+    data
+  );
 
-          setMessages(
-            (previous) => [
-              ...previous,
-              assistantMessage,
-            ]
-          );
+const assistantMessage =
+  normalizeAssistantMessage(
+    data,
+    nextDraft
+  );
 
+setMessages(
+  (previous) => [
+    ...previous,
+    assistantMessage,
+  ]
+);
 
-          setDraft(
-            (currentDraft) =>
-              updateDraftFromResponse(
-                currentDraft,
-                data
-              )
-          );
+setDraft(nextDraft);
 
 
           if (data?.error) {
@@ -755,26 +754,59 @@ export default function useChat() {
   // Regenerate draft
   // ==========================================================
 
-  const regenerateDraft =
-    useCallback(
-      async () => {
+  // ==========================================================
+// TASK 32 — Regenerate draft
+//
+// Flow:
+//
+// Regenerate
+//     ↓
+// Chat request
+//     ↓
+// rewrite_reply / regenerate_reply
+//     ↓
+// backend returns NEW draft
+//     ↓
+// replace centralized DraftState
+// ==========================================================
 
-        if (!draft?.draft_id) {
-          setError(
-            "No active draft is available."
-          );
-          return;
-        }
+const regenerateDraft =
+  useCallback(
+    async () => {
 
-        await sendMessage(
-          `Regenerate draft ${draft.draft_id}`
+      if (!draft?.draft_id) {
+        setError(
+          "No active draft is available."
         );
-      },
-      [
-        draft?.draft_id,
-        sendMessage,
-      ]
-    );
+        return;
+      }
+
+      const draftId =
+        draft.draft_id;
+
+      const data =
+        await sendMessage(
+          `Regenerate draft ${draftId}`
+        );
+
+      if (!data) {
+        return;
+      }
+
+      /*
+       * sendMessage already processes the structured
+       * tool_result through updateDraftFromResponse().
+       *
+       * For rewrite_reply / regenerate_reply,
+       * draftState.js now returns a completely new
+       * DraftState from the backend response.
+       */
+    },
+    [
+      draft?.draft_id,
+      sendMessage,
+    ]
+  );
 
 
   // ==========================================================

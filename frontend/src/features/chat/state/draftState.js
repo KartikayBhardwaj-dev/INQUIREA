@@ -144,63 +144,79 @@ export function applyDraftAction(
   // REWRITE REPLY
   // ----------------------------------------------------------
 
-  if (tool === "rewrite_reply") {
+  // ----------------------------------------------------------
+// REWRITE / REGENERATE REPLY
+//
+// IMPORTANT:
+// Regeneration creates a NEW backend draft version.
+// The backend response is authoritative.
+//
+// Do NOT blindly merge the old draft into the new one.
+// ----------------------------------------------------------
 
-    return {
-      ...previous,
+if (
+  tool === "rewrite_reply" ||
+  tool === "regenerate_reply"
+) {
+  return {
+    draft_id:
+      firstDefined(
+        toolResult.draft_id,
+        toolResult.draftId
+      ),
 
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
+    email_id:
+      firstDefined(
+        toolResult.email_id,
+        toolResult.emailId
+      ),
 
-      email_id:
-        firstDefined(
-          toolResult.email_id,
-          toolResult.emailId,
-          previous.email_id
-        ),
+    content:
+      firstDefined(
+        toolResult.content,
+        toolResult.draft_content,
+        toolResult.body,
+        ""
+      ),
 
-      content:
-        firstDefined(
-          toolResult.content,
-          toolResult.draft_content,
-          toolResult.body,
-          previous.content
-        ),
+    version:
+      firstDefined(
+        toolResult.version,
+        1
+      ),
 
-      version:
-        firstDefined(
-          toolResult.version,
-          previous.version
-            ? previous.version + 1
-            : 1
-        ),
+    tone:
+      firstDefined(
+        toolResult.tone,
+        "professional"
+      ),
 
-      tone:
-        firstDefined(
-          toolResult.tone,
-          previous.tone
-        ),
+    approval_status:
+      normalizeStatus(
+        toolResult.approval_status ??
+        toolResult.status
+      ) ??
+      DRAFT_STATUS.PENDING,
 
-      approval_status:
-        DRAFT_STATUS.PENDING,
+    gmail_draft_id:
+      firstDefined(
+        toolResult.gmail_draft_id,
+        toolResult.gmailDraftId
+      ),
 
-      gmail_draft_id:
-        firstDefined(
-          toolResult.gmail_draft_id,
-          toolResult.gmailDraftId,
-          previous.gmail_draft_id
-        ),
+    is_sent:
+      Boolean(
+        toolResult.is_sent ??
+        false
+      ),
 
-      is_sent: false,
-
-      sent_at: null,
-    };
-  }
-
+    sent_at:
+      firstDefined(
+        toolResult.sent_at,
+        toolResult.sentAt
+      ),
+  };
+}
 
   // ----------------------------------------------------------
   // EDIT DRAFT
