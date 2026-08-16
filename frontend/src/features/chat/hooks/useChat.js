@@ -11,6 +11,7 @@ import {
   continueChat,
   getChatHistory,
   getConversations,
+  saveDraft,
 } from "../services/chat.service";
 
 import {
@@ -834,7 +835,56 @@ const regenerateDraft =
       ]
     );
 
+// ==========================================================
+// TASK 34 — Save draft to Gmail
+//
+// Flow:
+//
+// Approved
+//    ↓
+// Save to Gmail
+//    ↓
+// gmail_draft_id
+//
+// IMPORTANT:
+// approval_status and gmail_draft_id are separate states.
+// ==========================================================
 
+const saveDraftToGmail =
+  useCallback(
+    async () => {
+
+      if (!draft?.draft_id) {
+        setError(
+          "No active draft is available."
+        );
+        return null;
+      }
+
+      if (
+        draft.approval_status !== "APPROVED"
+      ) {
+        setError(
+          "Draft must be approved before saving to Gmail."
+        );
+        return null;
+      }
+
+      if (draft.gmail_draft_id) {
+        return null;
+      }
+
+      return sendMessage(
+        `Save draft ${draft.draft_id} to Gmail`
+      );
+    },
+    [
+      draft?.draft_id,
+      draft?.approval_status,
+      draft?.gmail_draft_id,
+      sendMessage,
+    ]
+  );
   // ==========================================================
   // Reject draft
   // ==========================================================
@@ -987,11 +1037,12 @@ const regenerateDraft =
     sendMessage,
 
     // Draft actions
-    editDraft,
-    regenerateDraft,
-    approveDraft,
-    rejectDraft,
-    sendDraft,
+editDraft,
+regenerateDraft,
+approveDraft,
+rejectDraft,
+saveDraftToGmail,
+sendDraft,
 
     // Conversation
     loadConversation,

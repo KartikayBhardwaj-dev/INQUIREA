@@ -79,3 +79,21 @@ export async function editDraft(
     message
   );
 }
+
+// ============================================================
+// TASK 34
+// Save approved draft to Gmail
+// ============================================================
+
+export async function saveDraft(
+  conversationId,
+  draftId
+) {
+  const message =
+    `Save draft ${draftId} to Gmail`;
+
+  return continueChat(
+    conversationId,
+    message
+  );
+}

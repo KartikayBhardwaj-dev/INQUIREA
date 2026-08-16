@@ -33,6 +33,7 @@ export default function ChatMessages({
   regenerateDraft,
   approveDraft,
   rejectDraft,
+  saveDraftToGmail,
   sendDraft,
 
   // ----------------------------------------------------------
@@ -50,6 +51,7 @@ export default function ChatMessages({
   onReplyEmail,
   onRegenerate,
 }) {
+
   const bottomRef =
     useRef(null);
 
@@ -129,6 +131,19 @@ export default function ChatMessages({
                 onRejectDraft={
                   rejectDraft
                 }
+
+                // ------------------------------------------------
+                // TASK 34
+                // Save approved draft to Gmail
+                // ------------------------------------------------
+
+                onSaveToGmail={
+                  saveDraftToGmail
+                }
+
+                // ------------------------------------------------
+                // Send only after Gmail draft exists
+                // ------------------------------------------------
 
                 onSendDraft={
                   sendDraft

@@ -12,22 +12,24 @@ export const DRAFT_STATUS = Object.freeze({
 
 export function createEmptyDraftState() {
   return {
-    draft_id: null,
-    email_id: null,
+  draft_id: null,
+  email_id: null,
 
-    content: "",
+  content: "",
 
-    version: null,
+  version: null,
 
-    tone: null,
+  tone: null,
 
-    approval_status:
-      DRAFT_STATUS.PENDING,
+  // Approval is independent from Gmail persistence.
+  approval_status:
+    DRAFT_STATUS.PENDING,
 
-    gmail_draft_id: null,
+  // null = not saved to Gmail.
+  gmail_draft_id: null,
 
-    is_sent: false,
+  is_sent: false,
 
-    sent_at: null,
-  };
+  sent_at: null,
+};
 }

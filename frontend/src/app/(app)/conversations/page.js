@@ -10,8 +10,12 @@ import EmailDetailsDrawer from "@/components/chat/EmailDetailsDrawer";
 
 import useChat from "@/features/chat/hooks/useChat";
 
+
 export default function ConversationsPage() {
-  const router = useRouter();
+
+  const router =
+    useRouter();
+
 
   const {
     messages,
@@ -23,79 +27,139 @@ export default function ConversationsPage() {
 
     error,
 
+    // ----------------------------------------------------------
+    // Centralized DraftState
+    // ----------------------------------------------------------
+
+    draft,
+
+    // ----------------------------------------------------------
+    // Chat actions
+    // ----------------------------------------------------------
+
     sendMessage,
     loadConversation,
     newConversation,
     regenerate,
+
+    // ----------------------------------------------------------
+    // Draft actions
+    // ----------------------------------------------------------
+
+    editDraft,
+    regenerateDraft,
+    approveDraft,
+    rejectDraft,
+    saveDraftToGmail,
+    sendDraft,
+
   } = useChat();
 
-  const [selectedEmail, setSelectedEmail] =
-    useState(null);
+
+  const [
+    selectedEmail,
+    setSelectedEmail,
+  ] = useState(null);
+
 
   function handleReply(email) {
+
     if (!email) {
       return;
     }
 
+
     const subject =
-      email.subject ?? "this email";
+      email.subject ??
+      "this email";
+
 
     setSelectedEmail(null);
+
 
     sendMessage(
       `Generate a reply to the email "${subject}".`
     );
   }
 
+
   return (
     <div className="fixed inset-0 z-40 flex min-h-0 overflow-hidden bg-neutral-950 text-white">
+
       {/* =========================================================
           CONVERSATION SIDEBAR
       ========================================================= */}
 
       <aside className="hidden w-[270px] shrink-0 border-r border-white/10 bg-neutral-950 lg:flex lg:flex-col">
+
         {/* Sidebar Header */}
 
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-4">
+
           <button
             type="button"
-            onClick={() => router.push("/inbox")}
+            onClick={() =>
+              router.push("/inbox")
+            }
             className="flex items-center gap-2 text-sm font-semibold text-white transition hover:text-white/70"
           >
+
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-black">
               ✦
             </span>
 
-            <span>INQUIREA</span>
+            <span>
+              INQUIREA
+            </span>
+
           </button>
+
         </div>
+
 
         {/* Conversation history */}
 
         <div className="min-h-0 flex-1 overflow-hidden">
+
           <ConversationSidebar
-            conversations={conversations}
+            conversations={
+              conversations
+            }
+
             activeConversationId={
               activeConversationId
             }
-            onSelect={loadConversation}
-            onNewConversation={newConversation}
+
+            onSelect={
+              loadConversation
+            }
+
+            onNewConversation={
+              newConversation
+            }
+
             isLoading={
               isLoadingConversations
             }
           />
+
         </div>
+
       </aside>
+
 
       {/* =========================================================
           MAIN CHAT
       ========================================================= */}
 
       <main className="flex min-w-0 flex-1 flex-col bg-neutral-950">
+
         {/* Header */}
 
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-neutral-950 px-5">
+
           <div>
+
             <h1 className="text-sm font-semibold text-white">
               AI Inbox
             </h1>
@@ -103,16 +167,22 @@ export default function ConversationsPage() {
             <p className="mt-0.5 text-[11px] text-white/40">
               Ask anything about your emails
             </p>
+
           </div>
 
+
           <div className="flex items-center gap-2">
+
             <button
               type="button"
-              onClick={newConversation}
+              onClick={
+                newConversation
+              }
               className="rounded-xl border border-white/10 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
             >
               + New Chat
             </button>
+
 
             <button
               type="button"
@@ -124,8 +194,11 @@ export default function ConversationsPage() {
             >
               ×
             </button>
+
           </div>
+
         </header>
+
 
         {/* Error */}
 
@@ -135,38 +208,117 @@ export default function ConversationsPage() {
           </div>
         )}
 
+
         {/* Chat */}
 
         <div className="min-h-0 flex-1">
+
           <ChatMessages
-            messages={messages}
-            isLoading={isLoading}
-            onSuggestion={sendMessage}
-            onOpenEmail={setSelectedEmail}
-            onReplyEmail={handleReply}
-            onRegenerate={regenerate}
+            messages={
+              messages
+            }
+
+            // ----------------------------------------------------
+            // Centralized DraftState
+            // ----------------------------------------------------
+
+            draft={
+              draft
+            }
+
+            // ----------------------------------------------------
+            // Task 30 / 31 / 34 draft actions
+            // ----------------------------------------------------
+
+            editDraft={
+              editDraft
+            }
+
+            regenerateDraft={
+              regenerateDraft
+            }
+
+            approveDraft={
+              approveDraft
+            }
+
+            rejectDraft={
+              rejectDraft
+            }
+
+            saveDraftToGmail={
+              saveDraftToGmail
+            }
+
+            sendDraft={
+              sendDraft
+            }
+
+            // ----------------------------------------------------
+            // General loading
+            // ----------------------------------------------------
+
+            isLoading={
+              isLoading
+            }
+
+            // ----------------------------------------------------
+            // Existing chat actions
+            // ----------------------------------------------------
+
+            onSuggestion={
+              sendMessage
+            }
+
+            onOpenEmail={
+              setSelectedEmail
+            }
+
+            onReplyEmail={
+              handleReply
+            }
+
+            onRegenerate={
+              regenerate
+            }
           />
+
         </div>
+
 
         {/* Input */}
 
         <ChatInput
-          onSend={sendMessage}
-          disabled={isLoading}
+          onSend={
+            sendMessage
+          }
+
+          disabled={
+            isLoading
+          }
         />
+
       </main>
+
 
       {/* =========================================================
           EMAIL DETAILS DRAWER
       ========================================================= */}
 
       <EmailDetailsDrawer
-        email={selectedEmail}
+        email={
+          selectedEmail
+        }
+
         onClose={() =>
           setSelectedEmail(null)
         }
-        onReply={handleReply}
+
+        onReply={
+          handleReply
+        }
       />
+
     </div>
   );
 }

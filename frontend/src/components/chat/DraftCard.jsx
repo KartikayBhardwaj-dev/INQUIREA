@@ -16,6 +16,7 @@ export default function DraftCard({
   onRegenerate,
   onApprove,
   onReject,
+  onSaveToGmail,
   onSend,
   isLoading = false,
 }) {
@@ -221,6 +222,9 @@ export default function DraftCard({
   const isApproved =
     status === DRAFT_STATUS.APPROVED;
 
+  const isSavedToGmail =
+    Boolean(draft.gmail_draft_id);
+
 
   return (
     <div className="mt-4 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.04]">
@@ -255,6 +259,32 @@ export default function DraftCard({
         </span>
 
       </div>
+
+
+      {/* ------------------------------------------------------
+          APPROVAL / GMAIL STATUS
+      ------------------------------------------------------ */}
+
+      {isApproved && (
+        <div className="border-b border-white/10 px-4 py-3">
+
+          <div className="flex flex-wrap gap-3">
+
+            <span className="text-xs text-white/70">
+              ✓ Draft approved
+            </span>
+
+
+            {isSavedToGmail && (
+              <span className="text-xs text-white/70">
+                ✓ Saved to Gmail
+              </span>
+            )}
+
+          </div>
+
+        </div>
+      )}
 
 
       {/* ------------------------------------------------------
@@ -358,20 +388,47 @@ export default function DraftCard({
         )}
 
 
-        {/* APPROVED */}
+        {/* ----------------------------------------------------
+            APPROVED → SAVE TO GMAIL
+        ---------------------------------------------------- */}
 
-        {isApproved && (
-          <button
-            type="button"
-            disabled={isLoading}
-            onClick={() =>
-              onSend?.()
-            }
-            className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            Send
-          </button>
-        )}
+        {isApproved &&
+          !isSavedToGmail && (
+            <button
+              type="button"
+              disabled={
+                isLoading ||
+                !onSaveToGmail
+              }
+              onClick={() =>
+                onSaveToGmail?.()
+              }
+              className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {isLoading
+                ? "Saving..."
+                : "Save to Gmail"}
+            </button>
+          )}
+
+
+        {/* ----------------------------------------------------
+            SAVED TO GMAIL → SEND
+        ---------------------------------------------------- */}
+
+        {isApproved &&
+          isSavedToGmail && (
+            <button
+              type="button"
+              disabled={isLoading}
+              onClick={() =>
+                onSend?.()
+              }
+              className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              Send
+            </button>
+          )}
 
       </div>
 

@@ -11,6 +11,7 @@ export default function ChatActionRenderer({
   onRegenerate,
   onApprove,
   onReject,
+  onSaveToGmail,
   onSend,
 
   isLoading,
@@ -32,12 +33,34 @@ export default function ChatActionRenderer({
     return (
       <DraftCard
         draft={draft}
-        onEdit={onEdit}
-        onRegenerate={onRegenerate}
-        onApprove={onApprove}
-        onReject={onReject}
-        onSend={onSend}
-        isLoading={isLoading}
+
+        onEdit={
+          onEdit
+        }
+
+        onRegenerate={
+          onRegenerate
+        }
+
+        onApprove={
+          onApprove
+        }
+
+        onReject={
+          onReject
+        }
+
+        onSaveToGmail={
+          onSaveToGmail
+        }
+
+        onSend={
+          onSend
+        }
+
+        isLoading={
+          isLoading
+        }
       />
     );
   }

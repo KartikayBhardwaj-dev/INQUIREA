@@ -158,6 +158,7 @@ if (
   tool === "rewrite_reply" ||
   tool === "regenerate_reply"
 ) {
+
   return {
     draft_id:
       firstDefined(
@@ -198,23 +199,13 @@ if (
       ) ??
       DRAFT_STATUS.PENDING,
 
-    gmail_draft_id:
-      firstDefined(
-        toolResult.gmail_draft_id,
-        toolResult.gmailDraftId
-      ),
+    // CRITICAL:
+    // Rewritten version has not been saved to Gmail.
+    gmail_draft_id: null,
 
-    is_sent:
-      Boolean(
-        toolResult.is_sent ??
-        false
-      ),
+    is_sent: false,
 
-    sent_at:
-      firstDefined(
-        toolResult.sent_at,
-        toolResult.sentAt
-      ),
+    sent_at: null,
   };
 }
 
@@ -224,47 +215,50 @@ if (
 
   if (tool === "edit_draft") {
 
-    return {
-      ...previous,
+  return {
+    ...previous,
 
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
+    draft_id:
+      firstDefined(
+        toolResult.draft_id,
+        toolResult.draftId,
+        previous.draft_id
+      ),
 
-      email_id:
-        firstDefined(
-          toolResult.email_id,
-          toolResult.emailId,
-          previous.email_id
-        ),
+    email_id:
+      firstDefined(
+        toolResult.email_id,
+        toolResult.emailId,
+        previous.email_id
+      ),
 
-      content:
-        firstDefined(
-          toolResult.content,
-          toolResult.draft_content,
-          toolResult.body,
-          previous.content
-        ),
+    content:
+      firstDefined(
+        toolResult.content,
+        toolResult.draft_content,
+        toolResult.body,
+        previous.content
+      ),
 
-      version:
-        firstDefined(
-          toolResult.version,
-          previous.version
-            ? previous.version + 1
-            : 1
-        ),
+    version:
+      firstDefined(
+        toolResult.version,
+        previous.version
+          ? previous.version + 1
+          : 1
+      ),
 
-      approval_status:
-        DRAFT_STATUS.PENDING,
+    approval_status:
+      DRAFT_STATUS.PENDING,
 
-      is_sent: false,
+    // Edited version must be saved again.
+    gmail_draft_id: null,
 
-      sent_at: null,
-    };
-  }
+    is_sent: false,
+
+    sent_at: null,
+  };
+}
 
 
   // ----------------------------------------------------------

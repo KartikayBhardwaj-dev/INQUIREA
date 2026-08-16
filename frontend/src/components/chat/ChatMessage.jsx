@@ -19,6 +19,7 @@ export default function ChatMessage({
   onRegenerateDraft,
   onApproveDraft,
   onRejectDraft,
+  onSaveToGmail,
   onSendDraft,
 
   isDraftLoading,
@@ -132,6 +133,9 @@ export default function ChatMessage({
                 onRegenerate={
                   onRegenerateDraft
                 }
+                onSaveToGmail={
+  onSaveToGmail
+}
                 onApprove={
                   onApproveDraft
                 }
