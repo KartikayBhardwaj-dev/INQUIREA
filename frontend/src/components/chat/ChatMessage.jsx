@@ -23,6 +23,8 @@ export default function ChatMessage({
   onSendDraft,
 
   isDraftLoading,
+  loadingAction,
+  getLoadingLabel,
 
   onOpenEmail,
   onReplyEmail,
@@ -38,6 +40,10 @@ export default function ChatMessage({
     copied,
     setCopied,
   ] = useState(false);
+
+
+  const isRegenerating =
+    loadingAction === "regenerate";
 
 
   async function handleCopy() {
@@ -98,9 +104,7 @@ export default function ChatMessage({
 
           <div className="min-w-0 flex-1">
 
-            {/* ----------------------------------------------------
-                TEXT
-            ---------------------------------------------------- */}
+            {/* TEXT */}
 
             {message.content && (
               <div className="text-sm leading-7 text-white/80">
@@ -113,35 +117,38 @@ export default function ChatMessage({
             )}
 
 
-            {/* ----------------------------------------------------
-                DRAFT ACTION
-            ---------------------------------------------------- */}
+            {/* DRAFT ACTION */}
 
             {message.action && (
               <ChatActionRenderer
-                action={message.action}
+                action={
+                  message.action
+                }
 
-                /*
-                 * IMPORTANT:
-                 *
-                 * Use the centralized current draft.
-                 * Do NOT use action.draft as the source of truth.
-                 */
-                draft={draft}
+                draft={
+                  draft
+                }
 
-                onEdit={onEditDraft}
+                onEdit={
+                  onEditDraft
+                }
+
                 onRegenerate={
                   onRegenerateDraft
                 }
+
                 onSaveToGmail={
-  onSaveToGmail
-}
+                  onSaveToGmail
+                }
+
                 onApprove={
                   onApproveDraft
                 }
+
                 onReject={
                   onRejectDraft
                 }
+
                 onSend={
                   onSendDraft
                 }
@@ -149,13 +156,19 @@ export default function ChatMessage({
                 isLoading={
                   isDraftLoading
                 }
+
+                loadingAction={
+                  loadingAction
+                }
+
+                getLoadingLabel={
+                  getLoadingLabel
+                }
               />
             )}
 
 
-            {/* ----------------------------------------------------
-                RETRIEVED EMAILS
-            ---------------------------------------------------- */}
+            {/* RETRIEVED EMAILS */}
 
             {message.retrievedEmails?.length > 0 && (
 
@@ -175,10 +188,15 @@ export default function ChatMessage({
                         email.message_id ??
                         `${email.subject ?? "email"}-${index}`
                       }
-                      email={email}
+
+                      email={
+                        email
+                      }
+
                       onOpen={
                         onOpenEmail
                       }
+
                       onReply={
                         onReplyEmail
                       }
@@ -191,16 +209,19 @@ export default function ChatMessage({
             )}
 
 
-            {/* ----------------------------------------------------
-                MESSAGE ACTIONS
-            ---------------------------------------------------- */}
+            {/* MESSAGE ACTIONS */}
 
             <div className="mt-3 flex items-center gap-1">
 
               <button
                 type="button"
-                onClick={handleCopy}
-                className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80"
+                onClick={
+                  handleCopy
+                }
+                disabled={
+                  isDraftLoading
+                }
+                className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
               >
                 {copied
                   ? "Copied"
@@ -210,14 +231,19 @@ export default function ChatMessage({
 
               <button
                 type="button"
+                disabled={
+                  isDraftLoading
+                }
                 onClick={() =>
                   onRegenerate?.(
                     messageIndex
                   )
                 }
-                className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80"
+                className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
               >
-                Regenerate
+                {isRegenerating
+                  ? "Generating..."
+                  : "Regenerate"}
               </button>
 
             </div>

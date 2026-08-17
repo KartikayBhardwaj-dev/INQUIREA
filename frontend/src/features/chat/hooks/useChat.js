@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 
@@ -11,12 +12,15 @@ import {
   continueChat,
   getChatHistory,
   getConversations,
-  saveDraft,
 } from "../services/chat.service";
 
 import {
   normalizeToolAction,
 } from "../utils/actionRenderer";
+
+import {
+  getFriendlyChatError,
+} from "../utils/errorMapper";
 
 import {
   createEmptyDraftState,
@@ -167,7 +171,8 @@ function updateDraftFromResponse(
   currentDraft,
   data
 ) {
-  const tool = getTool(data);
+  const tool =
+    getTool(data);
 
   const toolResult =
     getToolResult(data);
@@ -176,6 +181,8 @@ function updateDraftFromResponse(
     return currentDraft;
   }
 
+  // Do not modify the existing draft when
+  // backend reports an error.
   if (
     data?.success === false ||
     data?.error
@@ -218,7 +225,8 @@ function normalizeAssistantMessage(
     id:
       crypto.randomUUID(),
 
-    role: "assistant",
+    role:
+      "assistant",
 
     content:
       getAssistantText(data),
@@ -285,6 +293,23 @@ function normalizeConversation(
 
 
 // ============================================================
+// TASK 37 — Loading labels
+// ============================================================
+
+const LOADING_LABELS = {
+  sendMessage: "Sending...",
+  editDraft: "Saving...",
+  regenerateDraft: "Generating...",
+  approveDraft: "Approving...",
+  rejectDraft: "Rejecting...",
+  saveDraftToGmail: "Saving...",
+  sendDraft: "Sending...",
+  regenerate: "Generating...",
+  loadConversation: "Loading...",
+};
+
+
+// ============================================================
 // Hook
 // ============================================================
 
@@ -295,25 +320,62 @@ export default function useChat() {
     setMessages,
   ] = useState([]);
 
+
   const [
     conversations,
     setConversations,
   ] = useState([]);
+
 
   const [
     activeConversationId,
     setActiveConversationId,
   ] = useState(null);
 
+
+  // ==========================================================
+  // Legacy/general loading state
+  // ==========================================================
+
   const [
     isLoading,
     setIsLoading,
   ] = useState(false);
 
+
+  // ==========================================================
+  // TASK 37 — Action-specific loading
+  // ==========================================================
+
+  const [
+    loadingAction,
+    setLoadingAction,
+  ] = useState(null);
+
+
+  /*
+   * IMPORTANT:
+   *
+   * A ref is used as the actual synchronous lock.
+   *
+   * React state updates are asynchronous. Therefore:
+   *
+   *   click -> click
+   *
+   * could otherwise happen before `loadingAction` visually
+   * updates.
+   *
+   * This ref prevents duplicate backend operations immediately.
+   */
+  const actionLockRef =
+    useRef(false);
+
+
   const [
     isLoadingConversations,
     setIsLoadingConversations,
   ] = useState(true);
+
 
   const [
     error,
@@ -331,6 +393,83 @@ export default function useChat() {
   ] = useState(
     createEmptyDraftState()
   );
+
+
+  // ==========================================================
+  // TASK 37 — Start action
+  // ==========================================================
+
+  const startAction =
+    useCallback(
+      (actionName) => {
+
+        /*
+         * Hard synchronous lock.
+         *
+         * This is what protects Send and other backend
+         * operations against duplicate clicks.
+         */
+        if (actionLockRef.current) {
+          return false;
+        }
+
+
+        actionLockRef.current = true;
+
+
+        setLoadingAction(
+          actionName
+        );
+
+
+        setIsLoading(true);
+
+
+        return true;
+
+      },
+      []
+    );
+
+
+  // ==========================================================
+  // TASK 37 — Finish action
+  // ==========================================================
+
+  const finishAction =
+    useCallback(() => {
+
+      actionLockRef.current =
+        false;
+
+
+      setLoadingAction(null);
+
+
+      setIsLoading(false);
+
+    }, []);
+
+
+  // ==========================================================
+  // TASK 37 — Loading helpers
+  // ==========================================================
+
+  const isActionLoading =
+    useCallback(
+      (actionName) =>
+        loadingAction === actionName,
+      [loadingAction]
+    );
+
+
+  const getLoadingLabel =
+    useCallback(
+      (actionName = loadingAction) =>
+        LOADING_LABELS[actionName] ??
+        "Loading...",
+      [loadingAction]
+    );
 
 
   // ==========================================================
@@ -395,15 +534,35 @@ export default function useChat() {
           return;
         }
 
+
+        /*
+         * Do not allow a conversation switch while another
+         * backend action is running.
+         */
+        if (actionLockRef.current) {
+          return;
+        }
+
+
+        if (
+          !startAction(
+            "loadConversation"
+          )
+        ) {
+          return;
+        }
+
+
         try {
 
           setError(null);
-          setIsLoading(true);
+
 
           const data =
             await getChatHistory(
               conversationId
             );
+
 
           const history =
             Array.isArray(data)
@@ -422,6 +581,7 @@ export default function useChat() {
                   message.sender ??
                   "assistant";
 
+
                 const emails =
                   (
                     message.retrieved_emails ??
@@ -435,14 +595,17 @@ export default function useChat() {
                         email?.id != null
                     );
 
+
                 const tool =
                   message.tool ??
                   null;
+
 
                 const toolResult =
                   message.tool_result ??
                   message.toolResult ??
                   null;
+
 
                 return {
                   id:
@@ -505,6 +668,7 @@ export default function useChat() {
           let recoveredDraft =
             createEmptyDraftState();
 
+
           for (
             const message of normalized
           ) {
@@ -516,6 +680,7 @@ export default function useChat() {
               continue;
             }
 
+
             if (
               !message.tool ||
               !message.toolResult
@@ -523,9 +688,11 @@ export default function useChat() {
               continue;
             }
 
+
             if (message.error) {
               continue;
             }
+
 
             recoveredDraft =
               applyDraftAction(
@@ -535,9 +702,11 @@ export default function useChat() {
               );
           }
 
+
           setDraft(
             recoveredDraft
           );
+
 
           setActiveConversationId(
             conversationId
@@ -550,17 +719,25 @@ export default function useChat() {
             err
           );
 
+
           setError(
-            "Unable to load this conversation."
+            getFriendlyChatError(
+              err?.response?.data ??
+              err
+            )
           );
 
         } finally {
 
-          setIsLoading(false);
+          finishAction();
+
         }
 
       },
-      []
+      [
+        startAction,
+        finishAction,
+      ]
     );
 
 
@@ -570,25 +747,46 @@ export default function useChat() {
 
   const sendMessage =
     useCallback(
-      async (text) => {
+      async (
+        text,
+        actionName = "sendMessage"
+      ) => {
 
         const trimmed =
           text?.trim();
 
+
+        if (!trimmed) {
+          return null;
+        }
+
+
+        /*
+         * TASK 37:
+         *
+         * This is the central duplicate-operation protection.
+         *
+         * Every action which ultimately calls sendMessage()
+         * passes through this lock.
+         */
         if (
-          !trimmed ||
-          isLoading
+          !startAction(
+            actionName
+          )
         ) {
           return null;
         }
 
+
         setError(null);
+
 
         const userMessage = {
           id:
             crypto.randomUUID(),
 
-          role: "user",
+          role:
+            "user",
 
           content:
             trimmed,
@@ -609,6 +807,7 @@ export default function useChat() {
             new Date().toISOString(),
         };
 
+
         setMessages(
           (previous) => [
             ...previous,
@@ -616,11 +815,11 @@ export default function useChat() {
           ]
         );
 
-        setIsLoading(true);
 
         try {
 
           let data;
+
 
           if (
             activeConversationId
@@ -644,51 +843,70 @@ export default function useChat() {
           const conversationId =
             getConversationId(data);
 
+
           if (
             conversationId &&
             !activeConversationId
           ) {
+
             setActiveConversationId(
               conversationId
             );
           }
 
 
-          // Use current draft snapshot for
-          // action rendering.
-          const nextDraft =
-  updateDraftFromResponse(
-    draft,
-    data
-  );
+          // ==================================================
+          // TASK 36 — Backend error handling
+          // ==================================================
 
-const assistantMessage =
-  normalizeAssistantMessage(
-    data,
-    nextDraft
-  );
-
-setMessages(
-  (previous) => [
-    ...previous,
-    assistantMessage,
-  ]
-);
-
-setDraft(nextDraft);
-
-
-          if (data?.error) {
+          if (
+            data?.success === false ||
+            data?.error
+          ) {
 
             setError(
-              data.error.message ??
-              data.error.code ??
-              "The requested action could not be completed."
+              getFriendlyChatError(
+                data?.error ??
+                data
+              )
             );
+
           }
 
 
+          // ==================================================
+          // Draft processing
+          // ==================================================
+
+          const nextDraft =
+            updateDraftFromResponse(
+              draft,
+              data
+            );
+
+
+          const assistantMessage =
+            normalizeAssistantMessage(
+              data,
+              nextDraft
+            );
+
+
+          setMessages(
+            (previous) => [
+              ...previous,
+              assistantMessage,
+            ]
+          );
+
+
+          setDraft(
+            nextDraft
+          );
+
+
           await loadConversations();
+
 
           return data;
 
@@ -699,27 +917,30 @@ setDraft(nextDraft);
             err
           );
 
+
           setError(
-            err?.response?.data
-              ?.detail ??
-            err?.response?.data
-              ?.error?.message ??
-            "Something went wrong while talking to your inbox."
+            getFriendlyChatError(
+              err?.response?.data ??
+              err
+            )
           );
+
 
           return null;
 
         } finally {
 
-          setIsLoading(false);
+          finishAction();
+
         }
 
       },
       [
         activeConversationId,
-        isLoading,
         draft,
         loadConversations,
+        startAction,
+        finishAction,
       ]
     );
 
@@ -733,16 +954,20 @@ setDraft(nextDraft);
       async (content) => {
 
         if (!draft?.draft_id) {
+
           setError(
             "No active draft is available."
           );
-          return;
+
+          return null;
         }
 
-        const message =
-          `Update draft ${draft.draft_id} with: ${content}`;
 
-        await sendMessage(message);
+        return sendMessage(
+          `Update draft ${draft.draft_id} with: ${content}`,
+          "editDraft"
+        );
+
       },
       [
         draft?.draft_id,
@@ -752,62 +977,38 @@ setDraft(nextDraft);
 
 
   // ==========================================================
-  // Regenerate draft
+  // TASK 32 — Regenerate draft
   // ==========================================================
 
-  // ==========================================================
-// TASK 32 — Regenerate draft
-//
-// Flow:
-//
-// Regenerate
-//     ↓
-// Chat request
-//     ↓
-// rewrite_reply / regenerate_reply
-//     ↓
-// backend returns NEW draft
-//     ↓
-// replace centralized DraftState
-// ==========================================================
+  const regenerateDraft =
+    useCallback(
+      async () => {
 
-const regenerateDraft =
-  useCallback(
-    async () => {
+        if (!draft?.draft_id) {
 
-      if (!draft?.draft_id) {
-        setError(
-          "No active draft is available."
-        );
-        return;
-      }
+          setError(
+            "No active draft is available."
+          );
 
-      const draftId =
-        draft.draft_id;
+          return null;
+        }
 
-      const data =
-        await sendMessage(
-          `Regenerate draft ${draftId}`
+
+        const draftId =
+          draft.draft_id;
+
+
+        return sendMessage(
+          `Regenerate draft ${draftId}`,
+          "regenerateDraft"
         );
 
-      if (!data) {
-        return;
-      }
-
-      /*
-       * sendMessage already processes the structured
-       * tool_result through updateDraftFromResponse().
-       *
-       * For rewrite_reply / regenerate_reply,
-       * draftState.js now returns a completely new
-       * DraftState from the backend response.
-       */
-    },
-    [
-      draft?.draft_id,
-      sendMessage,
-    ]
-  );
+      },
+      [
+        draft?.draft_id,
+        sendMessage,
+      ]
+    );
 
 
   // ==========================================================
@@ -819,15 +1020,20 @@ const regenerateDraft =
       async () => {
 
         if (!draft?.draft_id) {
+
           setError(
             "No active draft is available."
           );
-          return;
+
+          return null;
         }
 
-        await sendMessage(
-          `Approve draft ${draft.draft_id}`
+
+        return sendMessage(
+          `Approve draft ${draft.draft_id}`,
+          "approveDraft"
         );
+
       },
       [
         draft?.draft_id,
@@ -835,56 +1041,58 @@ const regenerateDraft =
       ]
     );
 
-// ==========================================================
-// TASK 34 — Save draft to Gmail
-//
-// Flow:
-//
-// Approved
-//    ↓
-// Save to Gmail
-//    ↓
-// gmail_draft_id
-//
-// IMPORTANT:
-// approval_status and gmail_draft_id are separate states.
-// ==========================================================
 
-const saveDraftToGmail =
-  useCallback(
-    async () => {
+  // ==========================================================
+  // TASK 34 — Save draft to Gmail
+  // ==========================================================
 
-      if (!draft?.draft_id) {
-        setError(
-          "No active draft is available."
+  const saveDraftToGmail =
+    useCallback(
+      async () => {
+
+        if (!draft?.draft_id) {
+
+          setError(
+            "No active draft is available."
+          );
+
+          return null;
+        }
+
+
+        if (
+          draft.approval_status !==
+          "APPROVED"
+        ) {
+
+          setError(
+            "Draft must be approved before saving to Gmail."
+          );
+
+          return null;
+        }
+
+
+        if (draft.gmail_draft_id) {
+          return null;
+        }
+
+
+        return sendMessage(
+          `Save draft ${draft.draft_id} to Gmail`,
+          "saveDraftToGmail"
         );
-        return null;
-      }
 
-      if (
-        draft.approval_status !== "APPROVED"
-      ) {
-        setError(
-          "Draft must be approved before saving to Gmail."
-        );
-        return null;
-      }
+      },
+      [
+        draft?.draft_id,
+        draft?.approval_status,
+        draft?.gmail_draft_id,
+        sendMessage,
+      ]
+    );
 
-      if (draft.gmail_draft_id) {
-        return null;
-      }
 
-      return sendMessage(
-        `Save draft ${draft.draft_id} to Gmail`
-      );
-    },
-    [
-      draft?.draft_id,
-      draft?.approval_status,
-      draft?.gmail_draft_id,
-      sendMessage,
-    ]
-  );
   // ==========================================================
   // Reject draft
   // ==========================================================
@@ -894,15 +1102,20 @@ const saveDraftToGmail =
       async () => {
 
         if (!draft?.draft_id) {
+
           setError(
             "No active draft is available."
           );
-          return;
+
+          return null;
         }
 
-        await sendMessage(
-          `Reject draft ${draft.draft_id}`
+
+        return sendMessage(
+          `Reject draft ${draft.draft_id}`,
+          "rejectDraft"
         );
+
       },
       [
         draft?.draft_id,
@@ -920,15 +1133,20 @@ const saveDraftToGmail =
       async () => {
 
         if (!draft?.draft_id) {
+
           setError(
             "No active draft is available."
           );
-          return;
+
+          return null;
         }
 
-        await sendMessage(
-          `Send draft ${draft.draft_id}`
+
+        return sendMessage(
+          `Send draft ${draft.draft_id}`,
+          "sendDraft"
         );
+
       },
       [
         draft?.draft_id,
@@ -944,15 +1162,27 @@ const saveDraftToGmail =
   const newConversation =
     useCallback(() => {
 
+      /*
+       * Prevent changing conversation while a backend
+       * operation is running.
+       */
+      if (actionLockRef.current) {
+        return;
+      }
+
+
       setActiveConversationId(
         null
       );
 
+
       setMessages([]);
+
 
       setDraft(
         createEmptyDraftState()
       );
+
 
       setError(null);
 
@@ -968,12 +1198,16 @@ const saveDraftToGmail =
       async (messageIndex) => {
 
         if (
-          isLoading ||
           messageIndex < 1
         ) {
-          return;
+          return null;
         }
 
+
+        /*
+         * The actual synchronous duplicate protection happens
+         * inside sendMessage().
+         */
         const previousUserMessage =
           [...messages]
             .slice(
@@ -987,11 +1221,24 @@ const saveDraftToGmail =
                 "user"
             );
 
+
         if (
           !previousUserMessage
         ) {
-          return;
+          return null;
         }
+
+
+        /*
+         * Don't remove the message until the action has actually
+         * acquired the lock.
+         */
+        if (
+          actionLockRef.current
+        ) {
+          return null;
+        }
+
 
         setMessages(
           (previous) =>
@@ -1001,14 +1248,15 @@ const saveDraftToGmail =
             )
         );
 
-        await sendMessage(
-          previousUserMessage.content
+
+        return sendMessage(
+          previousUserMessage.content,
+          "regenerate"
         );
 
       },
       [
         messages,
-        isLoading,
         sendMessage,
       ]
     );
@@ -1021,12 +1269,22 @@ const saveDraftToGmail =
   return {
 
     messages,
+
     conversations,
 
     activeConversationId,
 
+    // General loading
     isLoading,
+
     isLoadingConversations,
+
+    // TASK 37
+    loadingAction,
+
+    isActionLoading,
+
+    getLoadingLabel,
 
     error,
 
@@ -1037,12 +1295,12 @@ const saveDraftToGmail =
     sendMessage,
 
     // Draft actions
-editDraft,
-regenerateDraft,
-approveDraft,
-rejectDraft,
-saveDraftToGmail,
-sendDraft,
+    editDraft,
+    regenerateDraft,
+    approveDraft,
+    rejectDraft,
+    saveDraftToGmail,
+    sendDraft,
 
     // Conversation
     loadConversation,

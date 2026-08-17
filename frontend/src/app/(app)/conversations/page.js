@@ -25,26 +25,17 @@ export default function ConversationsPage() {
     isLoading,
     isLoadingConversations,
 
+    loadingAction,
+    getLoadingLabel,
+
     error,
 
-    // ----------------------------------------------------------
-    // Centralized DraftState
-    // ----------------------------------------------------------
-
     draft,
-
-    // ----------------------------------------------------------
-    // Chat actions
-    // ----------------------------------------------------------
 
     sendMessage,
     loadConversation,
     newConversation,
     regenerate,
-
-    // ----------------------------------------------------------
-    // Draft actions
-    // ----------------------------------------------------------
 
     editDraft,
     regenerateDraft,
@@ -92,16 +83,15 @@ export default function ConversationsPage() {
 
       <aside className="hidden w-[270px] shrink-0 border-r border-white/10 bg-neutral-950 lg:flex lg:flex-col">
 
-        {/* Sidebar Header */}
-
         <div className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 px-4">
 
           <button
             type="button"
+            disabled={isLoading}
             onClick={() =>
               router.push("/inbox")
             }
-            className="flex items-center gap-2 text-sm font-semibold text-white transition hover:text-white/70"
+            className="flex items-center gap-2 text-sm font-semibold text-white transition hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-50"
           >
 
             <span className="flex h-8 w-8 items-center justify-center rounded-xl bg-white text-black">
@@ -116,8 +106,6 @@ export default function ConversationsPage() {
 
         </div>
 
-
-        {/* Conversation history */}
 
         <div className="min-h-0 flex-1 overflow-hidden">
 
@@ -139,8 +127,10 @@ export default function ConversationsPage() {
             }
 
             isLoading={
-              isLoadingConversations
+              isLoadingConversations ||
+              isLoading
             }
+
           />
 
         </div>
@@ -154,7 +144,7 @@ export default function ConversationsPage() {
 
       <main className="flex min-w-0 flex-1 flex-col bg-neutral-950">
 
-        {/* Header */}
+        {/* HEADER */}
 
         <header className="flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-neutral-950 px-5">
 
@@ -175,10 +165,11 @@ export default function ConversationsPage() {
 
             <button
               type="button"
+              disabled={isLoading}
               onClick={
                 newConversation
               }
-              className="rounded-xl border border-white/10 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10"
+              className="rounded-xl border border-white/10 px-3 py-2 text-xs font-medium text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
             >
               + New Chat
             </button>
@@ -186,10 +177,11 @@ export default function ConversationsPage() {
 
             <button
               type="button"
+              disabled={isLoading}
               onClick={() =>
                 router.push("/inbox")
               }
-              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 text-white transition hover:bg-white/10"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border border-white/10 text-white transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40"
               aria-label="Back to AI Inbox"
             >
               ×
@@ -200,7 +192,7 @@ export default function ConversationsPage() {
         </header>
 
 
-        {/* Error */}
+        {/* ERROR */}
 
         {error && (
           <div className="border-b border-red-400/20 bg-red-500/10 px-5 py-2.5 text-center text-xs text-red-300">
@@ -209,7 +201,7 @@ export default function ConversationsPage() {
         )}
 
 
-        {/* Chat */}
+        {/* CHAT */}
 
         <div className="min-h-0 flex-1">
 
@@ -218,17 +210,9 @@ export default function ConversationsPage() {
               messages
             }
 
-            // ----------------------------------------------------
-            // Centralized DraftState
-            // ----------------------------------------------------
-
             draft={
               draft
             }
-
-            // ----------------------------------------------------
-            // Task 30 / 31 / 34 draft actions
-            // ----------------------------------------------------
 
             editDraft={
               editDraft
@@ -254,17 +238,17 @@ export default function ConversationsPage() {
               sendDraft
             }
 
-            // ----------------------------------------------------
-            // General loading
-            // ----------------------------------------------------
-
             isLoading={
               isLoading
             }
 
-            // ----------------------------------------------------
-            // Existing chat actions
-            // ----------------------------------------------------
+            loadingAction={
+              loadingAction
+            }
+
+            getLoadingLabel={
+              getLoadingLabel
+            }
 
             onSuggestion={
               sendMessage
@@ -281,12 +265,13 @@ export default function ConversationsPage() {
             onRegenerate={
               regenerate
             }
+
           />
 
         </div>
 
 
-        {/* Input */}
+        {/* INPUT */}
 
         <ChatInput
           onSend={
@@ -294,6 +279,10 @@ export default function ConversationsPage() {
           }
 
           disabled={
+            isLoading
+          }
+
+          isLoading={
             isLoading
           }
         />

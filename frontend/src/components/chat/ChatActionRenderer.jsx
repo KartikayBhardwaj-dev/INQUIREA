@@ -15,6 +15,8 @@ export default function ChatActionRenderer({
   onSend,
 
   isLoading,
+  loadingAction,
+  getLoadingLabel,
 }) {
 
   if (!action) {
@@ -60,6 +62,14 @@ export default function ChatActionRenderer({
 
         isLoading={
           isLoading
+        }
+
+        loadingAction={
+          loadingAction
+        }
+
+        getLoadingLabel={
+          getLoadingLabel
         }
       />
     );

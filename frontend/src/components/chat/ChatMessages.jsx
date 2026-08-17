@@ -19,15 +19,7 @@ const suggestions = [
 export default function ChatMessages({
   messages = [],
 
-  // ----------------------------------------------------------
-  // Centralized DraftState
-  // ----------------------------------------------------------
-
   draft,
-
-  // ----------------------------------------------------------
-  // Draft actions
-  // ----------------------------------------------------------
 
   editDraft,
   regenerateDraft,
@@ -36,15 +28,9 @@ export default function ChatMessages({
   saveDraftToGmail,
   sendDraft,
 
-  // ----------------------------------------------------------
-  // General loading state
-  // ----------------------------------------------------------
-
   isLoading,
-
-  // ----------------------------------------------------------
-  // Existing chat actions
-  // ----------------------------------------------------------
+  loadingAction,
+  getLoadingLabel,
 
   onSuggestion,
   onOpenEmail,
@@ -57,9 +43,11 @@ export default function ChatMessages({
 
 
   useEffect(() => {
+
     bottomRef.current?.scrollIntoView({
       behavior: "smooth",
     });
+
   }, [
     messages,
     isLoading,
@@ -74,6 +62,10 @@ export default function ChatMessages({
         <EmptyChat
           onSuggestion={
             onSuggestion
+          }
+
+          disabled={
+            isLoading
           }
         />
 
@@ -102,19 +94,9 @@ export default function ChatMessages({
                   index
                 }
 
-                // ------------------------------------------------
-                // TASK 28
-                // Centralized DraftState
-                // ------------------------------------------------
-
                 draft={
                   draft
                 }
-
-                // ------------------------------------------------
-                // TASK 30 / 31
-                // Draft actions
-                // ------------------------------------------------
 
                 onEditDraft={
                   editDraft
@@ -132,34 +114,25 @@ export default function ChatMessages({
                   rejectDraft
                 }
 
-                // ------------------------------------------------
-                // TASK 34
-                // Save approved draft to Gmail
-                // ------------------------------------------------
-
                 onSaveToGmail={
                   saveDraftToGmail
                 }
-
-                // ------------------------------------------------
-                // Send only after Gmail draft exists
-                // ------------------------------------------------
 
                 onSendDraft={
                   sendDraft
                 }
 
-                // ------------------------------------------------
-                // Draft actions use the same loading state
-                // ------------------------------------------------
-
                 isDraftLoading={
                   isLoading
                 }
 
-                // ------------------------------------------------
-                // Existing email actions
-                // ------------------------------------------------
+                loadingAction={
+                  loadingAction
+                }
+
+                getLoadingLabel={
+                  getLoadingLabel
+                }
 
                 onOpenEmail={
                   onOpenEmail
@@ -168,10 +141,6 @@ export default function ChatMessages({
                 onReplyEmail={
                   onReplyEmail
                 }
-
-                // ------------------------------------------------
-                // Existing message regeneration
-                // ------------------------------------------------
 
                 onRegenerate={
                   onRegenerate
@@ -183,7 +152,15 @@ export default function ChatMessages({
 
 
           {isLoading && (
-            <ThinkingState />
+            <ThinkingState
+              loadingAction={
+                loadingAction
+              }
+
+              getLoadingLabel={
+                getLoadingLabel
+              }
+            />
           )}
 
 
@@ -207,13 +184,13 @@ export default function ChatMessages({
 
 function EmptyChat({
   onSuggestion,
+  disabled,
 }) {
+
   return (
     <div className="flex min-h-full items-center justify-center px-6 py-16">
 
       <div className="w-full max-w-3xl text-center">
-
-        {/* AI ICON */}
 
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-white text-xl font-bold text-black shadow-xl">
           ✦
@@ -231,8 +208,6 @@ function EmptyChat({
         </p>
 
 
-        {/* SUGGESTIONS */}
-
         <div className="mt-8 grid gap-3 sm:grid-cols-2">
 
           {suggestions.map(
@@ -242,13 +217,20 @@ function EmptyChat({
                 key={
                   suggestion
                 }
+
                 type="button"
+
+                disabled={
+                  disabled
+                }
+
                 onClick={() =>
                   onSuggestion?.(
                     suggestion
                   )
                 }
-                className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-left text-xs font-medium text-white/75 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.08] hover:text-white"
+
+                className="rounded-2xl border border-white/10 bg-white/[0.04] px-4 py-4 text-left text-xs font-medium text-white/75 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[0.08] hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {suggestion}
               </button>
@@ -269,7 +251,18 @@ function EmptyChat({
    THINKING
 ========================================================================= */
 
-function ThinkingState() {
+function ThinkingState({
+  loadingAction,
+  getLoadingLabel,
+}) {
+
+  const label =
+    getLoadingLabel?.(
+      loadingAction
+    ) ??
+    "Loading...";
+
+
   return (
     <div className="px-4 py-4 sm:px-8">
 
@@ -294,7 +287,7 @@ function ThinkingState() {
 
 
           <span className="text-xs text-white/45">
-            Searching your emails...
+            {label}
           </span>
 
         </div>
