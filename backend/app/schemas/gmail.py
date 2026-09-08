@@ -40,7 +40,7 @@ class SendReplyRequest(BaseModel):
 class SendReplyResponse(BaseModel):
     status: str
     draft_id: int
-    message_id: str
+    gmail_message_id: str
 
 
 # ---------------------------------------------------------

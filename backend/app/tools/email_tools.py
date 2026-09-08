@@ -59,41 +59,57 @@ class EmailTools:
         self.service = service
 
     def search_emails(
-        self,
-        query: str,
-        limit: int = 5,
-        category: str | None = None,
-        priority: str | None = None,
-        sender: str | None = None,
-        requires_reply: bool | None = None,
-        sort_by: str = "relevance",
-        date_from: str | None = None,
-        date_to: str | None = None,
-    ) -> list[dict[str, Any]]:
-        """Search emails using semantic hybrid retrieval."""
-        return self.service.search_emails(
-            query=query,
-            limit=limit,
-            category=category,
-            priority=priority,
-            sender=sender,
-            requires_reply=requires_reply,
-            sort_by=sort_by,
-            date_from=date_from,
-            date_to=date_to,
-        )
+    self,
+    query: str,
+    user_id: int,
+    limit: int = 5,
+    category: str | None = None,
+    priority: str | None = None,
+    sender: str | None = None,
+    requires_reply: bool | None = None,
+    sort_by: str = "relevance",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict[str, Any]]:
 
-    def get_email(self, email_id: int) -> dict[str, Any] | None:
-        """Retrieve a single email by ID."""
-        return self.service.get_email(email_id)
+        return self.service.search_emails(
+        query=query,
+        user_id=user_id,
+        limit=limit,
+        category=category,
+        priority=priority,
+        sender=sender,
+        requires_reply=requires_reply,
+        sort_by=sort_by,
+        date_from=date_from,
+        date_to=date_to,
+    )
+
+    def get_email(
+    self,
+    email_id: int,
+    user_id: int,
+) -> dict[str, Any] | None:
+
+        return self.service.get_email(
+        email_id=email_id,
+        user_id=user_id,
+    )
 
     def summarize_thread(self, email_ids: list[int]) -> list[dict[str, Any]]:
         """Retrieve multiple emails for thread summarization."""
         return self.service.summarize_thread(email_ids)
 
-    def list_reply_required(self, limit: int = 20) -> list[dict[str, Any]]:
-        """Return emails that require replies."""
-        return self.service.list_reply_required(limit=limit)
+    def list_reply_required(
+    self,
+    user_id: int,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+
+        return self.service.list_reply_required(
+        user_id=user_id,
+        limit=limit,
+    )
 
 
 # =============================================================================
@@ -110,7 +126,16 @@ class SearchEmailsTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         params = SearchEmailsInput(**kwargs).model_dump()
-        results = self.tools.search_emails(**params)
+
+        user_id = kwargs.get("user_id")
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
+
+        results = self.tools.search_emails(
+        user_id=user_id,
+    **params,
+)
         return {
             "message": f"Successfully retrieved {len(results)} email(s).",
             "emails_found": len(results),
@@ -128,7 +153,15 @@ class GetEmailTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         params = GetEmailInput(**kwargs).model_dump()
-        email = self.tools.get_email(params["email_id"])
+        user_id = kwargs.get("user_id")
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
+
+        email = self.tools.get_email(
+    email_id=params["email_id"],
+    user_id=user_id,
+)
         if not email:
             return {
                 "message": f"Email with ID {params['email_id']} was not found.",
@@ -152,7 +185,15 @@ class ListReplyRequiredTool(BaseTool):
 
     async def execute(self, **kwargs: Any) -> dict[str, Any]:
         params = ListReplyRequiredInput(**kwargs).model_dump()
-        results = self.tools.list_reply_required(limit=params["limit"])
+        user_id = kwargs.get("user_id")
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
+
+        results = self.tools.list_reply_required(
+        user_id=user_id,
+    limit=params["limit"],
+)
         return {
             "message": f"Found {len(results)} email(s) requiring a reply.",
             "emails_found": len(results),

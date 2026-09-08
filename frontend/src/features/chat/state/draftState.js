@@ -76,68 +76,62 @@ export function applyDraftAction(
   // ----------------------------------------------------------
 
   if (tool === "generate_reply") {
+  return {
+    draft_id:
+      firstDefined(
+        toolResult.draft_id,
+        toolResult.draftId
+      ),
 
-    return {
-      ...previous,
+    email_id:
+      firstDefined(
+        toolResult.email_id,
+        toolResult.emailId
+      ),
 
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId
-        ),
+    content:
+      firstDefined(
+        toolResult.content,
+        toolResult.draft_content,
+        toolResult.body,
+        ""
+      ),
 
-      email_id:
-        firstDefined(
-          toolResult.email_id,
-          toolResult.emailId
-        ),
+    version:
+      firstDefined(
+        toolResult.version,
+        null
+      ),
 
-      content:
-        firstDefined(
-          toolResult.content,
-          toolResult.draft_content,
-          toolResult.body,
-          ""
-        ),
+    tone:
+      firstDefined(
+        toolResult.tone,
+        "professional"
+      ),
 
-      version:
-        firstDefined(
-          toolResult.version,
-          1
-        ),
+    approval_status:
+      normalizeStatus(
+        toolResult.approval_status ??
+        toolResult.status
+      ) ??
+      DRAFT_STATUS.PENDING,
 
-      tone:
-        firstDefined(
-          toolResult.tone,
-          "professional"
-        ),
+    gmail_draft_id:
+      firstDefined(
+        toolResult.gmail_draft_id,
+        toolResult.gmailDraftId
+      ),
 
-      approval_status:
-        normalizeStatus(
-          toolResult.approval_status ??
-          toolResult.status
-        ) ??
-        DRAFT_STATUS.PENDING,
+    is_sent:
+      Boolean(toolResult.is_sent ?? false),
 
-      gmail_draft_id:
-        firstDefined(
-          toolResult.gmail_draft_id,
-          toolResult.gmailDraftId
-        ),
-
-      is_sent:
-        Boolean(
-          toolResult.is_sent ??
-          false
-        ),
-
-      sent_at:
-        firstDefined(
-          toolResult.sent_at,
-          toolResult.sentAt
-        ),
-    };
-  }
+    sent_at:
+      firstDefined(
+        toolResult.sent_at,
+        toolResult.sentAt
+      ),
+  };
+}
 
 
   // ----------------------------------------------------------
@@ -360,30 +354,36 @@ if (tool === "approve_draft") {
   // ----------------------------------------------------------
 
   if (tool === "send_reply") {
+  return {
+    ...previous,
 
-    return {
-      ...previous,
+    draft_id:
+      firstDefined(
+        toolResult.draft_id,
+        toolResult.draftId,
+        previous.draft_id
+      ),
 
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
+    gmail_draft_id:
+      firstDefined(
+        toolResult.gmail_draft_id,
+        toolResult.gmailDraftId,
+        previous.gmail_draft_id
+      ),
 
-      approval_status:
-        DRAFT_STATUS.SENT,
+    approval_status:
+      DRAFT_STATUS.APPROVED,
 
-      is_sent: true,
+    is_sent: true,
 
-      sent_at:
-        firstDefined(
-          toolResult.sent_at,
-          toolResult.sentAt,
-          new Date().toISOString()
-        ),
-    };
-  }
+    sent_at:
+      firstDefined(
+        toolResult.sent_at,
+        toolResult.sentAt,
+        new Date().toISOString()
+      ),
+  };
+}
 
 
   // Unknown action → don't touch draft.

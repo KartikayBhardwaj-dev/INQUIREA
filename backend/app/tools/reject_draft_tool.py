@@ -3,7 +3,7 @@ from __future__ import annotations
 from backend.app.services.approval_service import ApprovalService
 from backend.app.tools.approval_tools import ApprovalTools
 from backend.app.tools.base_tool import BaseTool
-
+from backend.app.models.approval import ApprovalStatus
 
 class RejectDraftTool(BaseTool):
 
@@ -66,8 +66,11 @@ class RejectDraftTool(BaseTool):
         # =====================================================
 
         return {
-            "draft_id": approval.draft_reply_id,
-            "approval_status": approval.status,
-            "can_send": False,
-            "message": "Draft rejected.",
-        }
+    "draft_id": approval.draft_reply_id,
+    "approval_status": approval.status,
+    "can_send": (
+        approval.status
+        == ApprovalStatus.APPROVED.value
+    ),
+    "message": "Draft rejected.",
+}

@@ -33,7 +33,7 @@ class EmailEmbedding(Base):
 
     # Adjustable vector dimensions (defaults to 1536 for standard embeddings)
     embedding: Mapped[list[float] | None] = mapped_column(
-        Vector(1536),
+        Vector(384),
         nullable=False,
     )
 

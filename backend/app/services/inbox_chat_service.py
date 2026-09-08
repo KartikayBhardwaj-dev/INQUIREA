@@ -28,7 +28,7 @@ class InboxChatService:
     - Return validated ChatResponse objects
     """
 
-    HISTORY_LIMIT = 8
+    HISTORY_LIMIT = 20
 
     def __init__(self, db: Session):
         self.db = db
@@ -78,7 +78,7 @@ class InboxChatService:
                 {
                     "role": row.role,
                     "message": row.message,
-                    "metadata": getattr(row, "metadata", None) or {},
+                    "metadata": row.message_metadata or {},
                 }
             )
 
@@ -105,7 +105,7 @@ class InboxChatService:
                 user_id=user_id,
                 role=role,
                 message=message,
-                metadata=metadata or {},
+                message_metadata=metadata or {},
             )
         )
 
@@ -161,25 +161,50 @@ class InboxChatService:
         action_metadata = result.get("context_metadata") or {}
 
         if not isinstance(action_metadata, dict):
+
             action_metadata = {}
 
-        # Always preserve the executed tool when available.
-        if result.get("tool"):
-            action_metadata.setdefault(
-                "tool",
-                result["tool"],
-            )
+# Always preserve tool
 
-        # Preserve IDs from the structured tool result.
+        tool_name = result.get("tool")
+
+        if tool_name:
+
+            action_metadata["tool"] = tool_name
+
+            action_metadata["action"] = tool_name
+
+# Preserve complete tool result
+
         tool_result = result.get("tool_result")
 
         if isinstance(tool_result, dict):
 
+            action_metadata["tool_result"] = tool_result
+
             if tool_result.get("draft_id") is not None:
+
                 action_metadata["draft_id"] = tool_result["draft_id"]
 
             if tool_result.get("email_id") is not None:
+
                 action_metadata["email_id"] = tool_result["email_id"]
+
+            if tool_result.get("approval_status") is not None:
+
+                action_metadata["approval_status"] = (
+
+            tool_result["approval_status"]
+
+        )
+
+# Preserve query plan for debugging / audit
+
+        query_plan = result.get("query_plan")
+
+        if isinstance(query_plan, dict):
+
+            action_metadata["query_plan"] = query_plan
 
         # --------------------------------------------------
         # Persist conversation turn
@@ -240,6 +265,7 @@ class InboxChatService:
             ),
             tool=result.get("tool"),
             tool_result=result.get("tool_result"),
+            error=result.get("error"),
         )
 
     def get_conversation(

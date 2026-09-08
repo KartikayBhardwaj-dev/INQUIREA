@@ -163,7 +163,7 @@ class DraftService:
             )
 
             # Entire generation workflow commits once.
-            self.db.commit()
+            self.db.flush()
 
             self.db.refresh(draft)
 
@@ -267,7 +267,7 @@ class DraftService:
                 commit=False,
             )
 
-            self.db.commit()
+            self.db.flush()
 
             self.db.refresh(new_draft)
 
@@ -319,50 +319,69 @@ class DraftService:
     # =========================================================
 
     def save_draft(
-        self,
-        draft_id: int,
-        content: str,
-        user_id: int | None = None,
-    ) -> DraftReply:
+    self,
+    draft_id: int,
+    content: str,
+    user_id: int | None = None,
+) -> DraftReply:
+        
 
         user_id = self._require_user(user_id)
 
         try:
             draft = self.load_draft(
-                draft_id=draft_id,
-                user_id=user_id,
-            )
+            draft_id=draft_id,
+            user_id=user_id,
+        )
 
             if draft is None:
                 raise ValueError(
-                    f"Draft with ID {draft_id} not found."
-                )
+                f"Draft with ID {draft_id} not found."
+            )
 
             if not content or not content.strip():
                 raise ValueError(
-                    "Draft content cannot be empty."
-                )
-
-            draft.draft = content.strip()
-
-            self.approval_service.reset_to_pending(
-                draft_id=draft.id,
-                user_id=user_id,
-                commit=False,
+                "Draft content cannot be empty."
             )
+
+        # ---------------------------------------------
+        # Create a NEW VERSION
+        # ---------------------------------------------
+
+            new_draft = self.repository.create_draft(
+            email_id=draft.email_id,
+            content=content.strip(),
+            user_id=user_id,
+            tone=draft.tone or "professional",
+        )
 
             self.db.flush()
-            self.db.commit()
 
-            self.db.refresh(draft)
+        # ---------------------------------------------
+        # New version requires fresh approval
+        # ---------------------------------------------
+
+            self.approval_service.reset_to_pending(
+            draft_id=new_draft.id,
+            user_id=user_id,
+            commit=False,
+        )
+
+            self.db.flush()
+
+            self.db.refresh(new_draft)
 
             logger.info(
-                "Edited Draft ID %s for User ID %s.",
-                draft_id,
-                user_id,
-            )
+            "Created edited Draft version %s "
+            "ID %s from Draft ID %s "
+            "for User ID %s.",
+            new_draft.version,
+            new_draft.id,
+            draft.id,
+            user_id,
+        )
 
-            return draft
+            return new_draft
 
         except Exception:
             self.db.rollback()
@@ -412,7 +431,7 @@ class DraftService:
                 commit=False,
             )
 
-            self.db.commit()
+            self.db.flush()
 
             self.db.refresh(new_draft)
 

@@ -49,7 +49,16 @@ export async function getChatHistory(
 
   return response.data;
 }
+export async function getEmailDetails(
+  gmailMessageId
+) {
+  const response =
+    await api.get(
+      `/emails/${gmailMessageId}`
+    );
 
+  return response.data;
+}
 
 export async function getConversations() {
   const response =

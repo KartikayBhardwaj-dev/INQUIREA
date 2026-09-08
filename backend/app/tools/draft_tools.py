@@ -25,16 +25,18 @@ class DraftTools:
         )
 
     async def rewrite_reply(
-        self,
-        draft_id: int,
-        tone: str = "professional",
-        user_id: int | None = None,
-    ) -> Any:
+    self,
+    draft_id: int,
+    tone: str = "professional",
+    instruction: str | None = None,
+    user_id: int | None = None,
+) -> Any:
         return await self.service.rewrite_draft(
-            draft_id=draft_id,
-            tone=tone,
-            user_id=user_id,
-        )
+        draft_id=draft_id,
+        tone=tone,
+        instruction=instruction,
+        user_id=user_id,
+    )
 
     async def regenerate_reply(
         self,

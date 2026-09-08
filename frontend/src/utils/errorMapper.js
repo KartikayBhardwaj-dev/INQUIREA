@@ -1,9 +1,6 @@
 // ============================================================
 // Chat Error Mapper
 // ============================================================
-//
-// Converts backend error codes into user-friendly messages.
-// ============================================================
 
 const CHAT_ERROR_MESSAGES = {
   APPROVAL_REQUIRED:
@@ -17,6 +14,12 @@ const CHAT_ERROR_MESSAGES = {
 
   GMAIL_API_ERROR:
     "Gmail could not complete this action. Please try again.",
+
+  GMAIL_DRAFT_NOT_FOUND:
+    "The Gmail draft no longer exists. Please save the draft again.",
+
+  SEND_FAILED:
+    "The email could not be sent. Please try again.",
 };
 
 
@@ -35,26 +38,20 @@ function getErrorCode(error) {
   }
 
 
-  // Example:
-  // "APPROVAL_REQUIRED"
-
   if (typeof error === "string") {
     return error;
   }
 
 
-  // Possible backend formats:
-  //
-  // { code: "APPROVAL_REQUIRED" }
-  //
-  // { error: { code: "APPROVAL_REQUIRED" } }
-  //
-  // { detail: { code: "APPROVAL_REQUIRED" } }
-
   return (
     error?.code ??
+    error?.error_code ??
+    error?.errorCode ??
     error?.error?.code ??
+    error?.error?.error_code ??
     error?.detail?.code ??
+    error?.detail?.error_code ??
+    error?.detail?.errorCode ??
     null
   );
 }
@@ -105,7 +102,6 @@ export function getFriendlyChatError(error) {
     getErrorCode(error);
 
 
-  // Known backend error
   if (
     code &&
     CHAT_ERROR_MESSAGES[code]
@@ -114,7 +110,6 @@ export function getFriendlyChatError(error) {
   }
 
 
-  // Unknown backend error with a message
   const message =
     getErrorMessage(error);
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from backend.app.services.approval_service import ApprovalService
 from backend.app.services.draft_service import DraftService
+from backend.app.services.approval_service import ApprovalService
 from backend.app.tools.base_tool import BaseTool
 
 
@@ -13,21 +13,21 @@ class EditDraftTool(BaseTool):
         self,
         **kwargs,
     ):
-        # =====================================================
-        # VALIDATE INPUT
-        # =====================================================
-
         draft_id = kwargs.get("draft_id")
         content = kwargs.get("content")
         user_id = kwargs.get("user_id")
         db = kwargs.get("db")
+
+        # =====================================================
+        # VALIDATE INPUT
+        # =====================================================
 
         if draft_id is None:
             raise ValueError(
                 "draft_id is required."
             )
 
-        if content is None:
+        if content is None or not content.strip():
             raise ValueError(
                 "content is required."
             )
@@ -43,29 +43,22 @@ class EditDraftTool(BaseTool):
             )
 
         # =====================================================
-        # UPDATE DRAFT
+        # EDIT DRAFT
         # =====================================================
 
-        draft_service = DraftService(db)
+        service = DraftService(db)
 
-        draft = draft_service.save_draft(
+        draft = service.version_draft(
             draft_id=draft_id,
-            content=content,
+            content=content.strip(),
             user_id=user_id,
         )
 
-        if draft is None:
-            raise ValueError(
-                f"Draft {draft_id} not found."
-            )
-
-        # =====================================================
-        # RESET APPROVAL
-        # =====================================================
+        # save_draft() already resets approval to PENDING.
 
         approval_service = ApprovalService(db)
 
-        approval = approval_service.reset_to_pending(
+        approval_status = approval_service.get_status(
             draft_id=draft.id,
             user_id=user_id,
         )
@@ -78,6 +71,8 @@ class EditDraftTool(BaseTool):
             "draft_id": draft.id,
             "email_id": draft.email_id,
             "draft": draft.draft,
-            "approval_status": approval.status,
+            "version": draft.version,
+            "is_current": draft.is_current,
+            "approval_status": approval_status,
             "message": "Draft updated.",
         }

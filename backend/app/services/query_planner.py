@@ -26,7 +26,7 @@ class QueryPlan(BaseModel):
     ]
 
     semantic_query: str | None = None
-
+    email_reference: str | None = None
     category: str | None = None
 
     priority: Literal[
@@ -109,7 +109,17 @@ AVAILABLE INTENTS
 5. deadline_search
 
 Choose exactly ONE.
-
+==========================
+Natural-language email references:
+- If the user refers to an email by subject, title, sender, or another natural-language identifier, preserve that reference in `email_reference`.
+- Do NOT invent an email_id.
+- Example:
+  User: Generate a reply to the email "4 new image styles to try"
+  Plan:
+    tool_name: generate_reply
+    email_reference: "4 new image styles to try"
+    email_id: null
+========================
 ========================================================
 EXPLICIT CONVERSATIONAL CONTEXT
 ========================================================
@@ -119,16 +129,16 @@ previous assistant tool executions.
 
 Example:
 
-{{
+{{{{
     "role": "assistant",
     "message": "Draft generated successfully.",
-    "metadata": {{
+    "metadata": {{{{
         "tool": "generate_reply",
         "action": "generate_reply",
         "email_id": 25,
         "draft_id": 40
-    }}
-}}
+    }}}}
+}}}}
 
 The structured metadata is authoritative for resolving
 references to objects created or accessed by previous
@@ -179,10 +189,10 @@ When the user says:
 
 and the most recent relevant context contains:
 
-{{
+{{{{
     "draft_id": 40,
     "email_id": 25
-}}
+}}}}
 
 use:
 
@@ -194,11 +204,11 @@ Example:
 
 Previous assistant result:
 
-{{
+{{{{
     "tool": "generate_reply",
     "draft_id": 40,
     "email_id": 25
-}}
+}}}}
 
 User:
 
@@ -206,14 +216,14 @@ User:
 
 Correct plan:
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "rewrite_reply",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 40,
         "instruction": "make it shorter"
-    }}
-}}
+    }}}}
+}}}}
 
 ========================================================
 EMAIL CONTEXT
@@ -233,10 +243,10 @@ Example:
 
 Previous assistant result:
 
-{{
+{{{{
     "tool": "get_email",
     "email_id": 25
-}}
+}}}}
 
 User:
 
@@ -244,14 +254,14 @@ User:
 
 Correct plan:
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "generate_reply",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "email_id": 25,
         "tone": "professional"
-    }}
-}}
+    }}}}
+}}}}
 
 ========================================================
 CONTEXT PRIORITY
@@ -291,15 +301,19 @@ GENERATE REPLY
 
 "Generate a reply to email 10"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "generate_reply",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "email_id": 10,
         "tone": "professional"
-    }}
-}}
+    }}}}
+}}}}
+Generate reply requires either:
+- email_id, OR
+- email_reference.
 
+If an email_reference is available, do not ask the user for an email_id. The backend will resolve the reference.
 ========================================================
 REWRITE REPLY
 ========================================================
@@ -315,31 +329,31 @@ Examples:
 
 "Make it shorter"
 
-{{
+{{{{
     "draft_id": 15,
     "instruction": "make it shorter"
-}}
+}}}}
 
 "Make it more professional"
 
-{{
+{{{{
     "draft_id": 15,
     "instruction": "make it more professional"
-}}
+}}}}
 
 "Change the ending"
 
-{{
+{{{{
     "draft_id": 15,
     "instruction": "change the ending"
-}}
+}}}}
 
 "Remove unnecessary details"
 
-{{
+{{{{
     "draft_id": 15,
     "instruction": "remove unnecessary details"
-}}
+}}}}
 
 ========================================================
 EDIT DRAFT
@@ -359,13 +373,13 @@ APPROVE
 
 "Approve draft 15"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "approve_draft",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 15
-    }}
-}}
+    }}}}
+}}}}
 
 "Approve it"
 
@@ -377,13 +391,13 @@ REJECT
 
 "Reject draft 15"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "reject_draft",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 15
-    }}
-}}
+    }}}}
+}}}}
 
 "Reject it"
 
@@ -395,13 +409,13 @@ SAVE
 
 "Save draft 15"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "save_draft",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 15
-    }}
-}}
+    }}}}
+}}}}
 
 "Save it"
 
@@ -413,13 +427,13 @@ UPDATE
 
 "Update draft 15"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "update_draft",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 15
-    }}
-}}
+    }}}}
+}}}}
 
 ========================================================
 SEND
@@ -427,13 +441,13 @@ SEND
 
 "Send draft 15"
 
-{{
+{{{{
     "needs_tool": true,
     "tool_name": "send_reply",
-    "tool_arguments": {{
+    "tool_arguments": {{{{
         "draft_id": 15
-    }}
-}}
+    }}}}
+}}}}
 
 "Send it"
 
@@ -538,9 +552,7 @@ tool_arguments must always be an object.
 
 reasoning must always be present.
 
-{{
-format_instructions
-}}
+{{format_instructions}}
 """,
                 ),
                 (
@@ -553,45 +565,17 @@ format_instructions
             ]
         )
 
+
     # ======================================================
     # STRUCTURED CONTEXT EXTRACTION
     # ======================================================
 
     @staticmethod
     def _get_context_ids(
-        conversation: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-
-        """
-        Extract the most recent relevant draft/email context.
-
-        Important:
-        We scan newest → oldest.
-
-        A single recent assistant tool result is preferred
-        over combining unrelated IDs from different messages.
-
-        Example:
-
-            generate_reply
-                email_id=25
-                draft_id=40
-
-        becomes:
-
-            {
-                "tool": "generate_reply",
-                "draft_id": 40,
-                "email_id": 25
-            }
-        """
-
-        context: dict[str, Any] = {}
-
-        # --------------------------------------------------
-        # First pass:
-        # Find the newest structured tool/action metadata.
-        # --------------------------------------------------
+    conversation: list[dict[str, Any]],
+) -> dict[str, Any]:
+        
+        
 
         for message in reversed(conversation):
 
@@ -600,81 +584,37 @@ format_instructions
             if not isinstance(metadata, dict):
                 continue
 
-            tool = metadata.get(
-                "tool"
-            ) or metadata.get(
-                "action"
-            )
+            tool = (
+            metadata.get("tool")
+            or metadata.get("action")
+        )
 
-            draft_id = metadata.get(
-                "draft_id"
-            )
-
-            email_id = metadata.get(
-                "email_id"
-            )
+            draft_id = metadata.get("draft_id")
+            email_id = metadata.get("email_id")
 
             if (
-                tool is not None
-                or draft_id is not None
-                or email_id is not None
-            ):
-
-                context["tool"] = tool
-
-                if draft_id is not None:
-                    context["draft_id"] = draft_id
-
-                if email_id is not None:
-                    context["email_id"] = email_id
-
-                # This is the most recent relevant context.
-                break
-
-        # --------------------------------------------------
-        # Second pass:
-        # Fill missing fields from older metadata only.
-        #
-        # This avoids mixing newer IDs over an already
-        # identified current object.
-        # --------------------------------------------------
-
-        if (
-            "draft_id" not in context
-            or "email_id" not in context
+            tool is not None
+            or draft_id is not None
+            or email_id is not None
         ):
+                return {
+                "tool": tool,
+                "draft_id": draft_id,
+                "email_id": email_id,
+            }
 
-            for message in reversed(conversation):
+        return {}
+    def _extract_email_reference(self, question: str) -> str | None:
+        match = re.search(
+        r'\bemail\b(?:\s+(?:titled|called|named))?\s*["\']([^"\']+)["\']',
+        question,
+        re.IGNORECASE,
+    )
 
-                metadata = message.get("metadata")
+        if match:
+            return match.group(1).strip()
 
-                if not isinstance(metadata, dict):
-                    continue
-
-                if (
-                    "draft_id" not in context
-                    and metadata.get("draft_id") is not None
-                ):
-                    context["draft_id"] = (
-                        metadata["draft_id"]
-                    )
-
-                if (
-                    "email_id" not in context
-                    and metadata.get("email_id") is not None
-                ):
-                    context["email_id"] = (
-                        metadata["email_id"]
-                    )
-
-                if (
-                    "draft_id" in context
-                    and "email_id" in context
-                ):
-                    break
-
-        return context
-
+        return None
     # ======================================================
     # EXPLICIT ID EXTRACTION
     # ======================================================
@@ -733,6 +673,7 @@ format_instructions
         explicit_ids = self._extract_explicit_ids(
             question
         )
+        email_reference = self._extract_email_reference(question)
 
         logger.debug(
             "Planner context: %s",
@@ -835,13 +776,28 @@ format_instructions
         # 4. BASIC NORMALIZATION
         # ==================================================
 
+    
+        # ==================================================
+# 4. BASIC NORMALIZATION
+# ==================================================
+
         plan.reasoning = (
-            plan.reasoning or ""
-        )
+    plan.reasoning or ""
+)
 
         plan.tool_arguments = (
-            plan.tool_arguments or {}
-        )
+    plan.tool_arguments or {}
+)
+
+# --------------------------------------------------
+# Natural-language email reference
+# --------------------------------------------------
+
+        if email_reference:
+            plan.email_reference = email_reference
+            plan.tool_arguments["email_reference"] = (
+        email_reference
+    )
 
         # ==================================================
         # 5. SEMANTIC NORMALIZATION
@@ -1181,11 +1137,12 @@ format_instructions
             ],
         }
 
-        # ==================================================
+                # ==================================================
         # 12. VALIDATE REQUIRED ARGUMENTS
         # ==================================================
 
         if plan.needs_tool:
+            
 
             required = (
                 required_tool_arguments.get(
@@ -1203,6 +1160,33 @@ format_instructions
                         argument
                     )
                 )
+
+                # --------------------------------------------------
+                # generate_reply special case
+                # --------------------------------------------------
+                #
+                # A generate_reply request can provide either:
+                #
+                #   email_id
+                #
+                # OR:
+                #
+                #   email_reference
+                #
+                # The ChatAgent resolves email_reference -> email_id.
+                #
+                # Therefore the planner MUST NOT ask the user for
+                # email_id when an email_reference is available.
+                # --------------------------------------------------
+
+                if (
+                    plan.tool_name == "generate_reply"
+                    and argument == "email_id"
+                    and plan.tool_arguments.get(
+                        "email_reference"
+                    )
+                ):
+                    continue
 
                 if value is None:
 

@@ -30,7 +30,7 @@ class DraftReply(Base):
         nullable=False,
     )
 
-    user_id: Mapped[int | None] = mapped_column(
+    user_id: Mapped[int] = mapped_column(
         Integer,
         nullable=True,
         index=True,

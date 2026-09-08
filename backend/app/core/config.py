@@ -4,6 +4,7 @@ from pydantic_settings import (
     BaseSettings,
     SettingsConfigDict,
 )
+from pathlib import Path
 
 class EmailCategory(str, Enum):
     OPPORTUNITY = "opportunity"
@@ -103,9 +104,10 @@ class Settings(BaseSettings):
     CELERY_BEAT_SCHEDULE_ENABLED: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        extra="ignore",
-    )
+    env_file=str(Path(__file__).resolve().parents[3] / ".env"),
+    env_file_encoding="utf-8",
+    extra="ignore",
+)
 
 
 @lru_cache

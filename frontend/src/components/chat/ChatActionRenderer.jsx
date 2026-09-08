@@ -34,7 +34,7 @@ export default function ChatActionRenderer({
 
     return (
       <DraftCard
-        draft={draft}
+  draft={action.draft ?? draft}
 
         onEdit={
           onEdit

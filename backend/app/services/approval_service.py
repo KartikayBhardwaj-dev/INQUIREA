@@ -126,7 +126,7 @@ class ApprovalService:
 
             # Standalone service workflow:
             # commit only after everything succeeded.
-            self.db.commit()
+
 
             self.db.refresh(approval)
 
@@ -185,7 +185,7 @@ class ApprovalService:
 
             self.db.flush()
 
-            self.db.commit()
+
 
             self.db.refresh(approval)
 
@@ -235,46 +235,63 @@ class ApprovalService:
     # =========================================================
 
     def _validate_transition(
-        self,
-        current_status: str,
-        new_status: str,
-    ) -> None:
+    self,
+    current_status: str,
+    new_status: str,
+) -> None:
 
         valid_statuses = {
-            ApprovalStatus.PENDING.value,
-            ApprovalStatus.APPROVED.value,
-            ApprovalStatus.REJECTED.value,
-        }
+        ApprovalStatus.PENDING.value,
+        ApprovalStatus.APPROVED.value,
+        ApprovalStatus.REJECTED.value,
+    }
 
         if current_status not in valid_statuses:
             raise ValueError(
-                f"Invalid current approval status: "
-                f"'{current_status}'."
-            )
+            f"Invalid current approval status: "
+            f"'{current_status}'."
+        )
 
         if new_status not in valid_statuses:
             raise ValueError(
-                f"Invalid target approval status: "
-                f"'{new_status}'."
-            )
-
-        if (
-            current_status == ApprovalStatus.PENDING.value
-            and new_status == ApprovalStatus.APPROVED.value
-        ):
-            return
-
-        if (
-            current_status == ApprovalStatus.PENDING.value
-            and new_status == ApprovalStatus.REJECTED.value
-        ):
-            return
-
-        raise ValueError(
-            f"Invalid approval transition: "
-            f"{current_status} → {new_status}."
+            f"Invalid target approval status: "
+            f"'{new_status}'."
         )
 
+    # ---------------------------------------------------------
+    # PENDING
+    # ---------------------------------------------------------
+
+        if current_status == ApprovalStatus.PENDING.value:
+
+            if new_status in {
+            ApprovalStatus.APPROVED.value,
+            ApprovalStatus.REJECTED.value,
+        }:
+                return
+
+    # ---------------------------------------------------------
+    # APPROVED
+    # ---------------------------------------------------------
+
+        if current_status == ApprovalStatus.APPROVED.value:
+
+            if new_status == ApprovalStatus.PENDING.value:
+                return
+
+    # ---------------------------------------------------------
+    # REJECTED
+    # ---------------------------------------------------------
+
+        if current_status == ApprovalStatus.REJECTED.value:
+
+            if new_status == ApprovalStatus.PENDING.value:
+                return
+
+        raise ValueError(
+        f"Invalid approval transition: "
+        f"{current_status} → {new_status}."
+    )
     # =========================================================
     # RESET TO PENDING
     # =========================================================
@@ -310,9 +327,12 @@ class ApprovalService:
                 self.db.add(approval)
 
             else:
-                approval.status = (
-                    ApprovalStatus.PENDING.value
-                )
+                self._validate_transition(
+        current_status=approval.status,
+        new_status=ApprovalStatus.PENDING.value,
+    )
+
+                approval.status = ApprovalStatus.PENDING.value
 
             # Always flush so the caller can use the
             # generated/updated DB state.

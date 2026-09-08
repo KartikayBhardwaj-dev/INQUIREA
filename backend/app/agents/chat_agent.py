@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from sqlalchemy.orm import Session
-
+from backend.app.services.email_tool_service import EmailToolService
 from backend.app.core.llm import get_llm
 from backend.app.services.chat_prompt_builder import ChatPromptBuilder
 from backend.app.services.chat_retriever import ChatRetriever
@@ -145,224 +145,307 @@ class ChatAgent:
         )
 
     async def _handle_tool_request(
-    self,
-    plan: QueryPlan,
-    user_id: int | None = None,
-) -> dict[str, Any]:
+        self,
+        plan: QueryPlan,
+        user_id: int | None = None,
+    ) -> dict[str, Any]:
 
         logger.info(
-        "Planner selected tool '%s'.",
-        plan.tool_name,
-    )
+            "Planner selected tool '%s'.",
+            plan.tool_name,
+        )
 
-    # --------------------------------------------------
-    # Build tool arguments
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Build tool arguments
+        # --------------------------------------------------
 
         tool_args = {
-        **plan.tool_arguments
-    }
+            **plan.tool_arguments
+        }
 
-    # user_id is injected by backend.
-    # Planner must never control authentication identity.
+        # user_id is injected by backend.
+        # Planner must never control authentication identity.
         if user_id is not None:
             tool_args["user_id"] = user_id
 
-    # --------------------------------------------------
-    # Execute tool
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Resolve natural-language email reference
+        # --------------------------------------------------
+        #
+        # Example:
+        #
+        # email_reference =
+        # "4 new image styles to try"
+        #
+        # → search user's emails
+        # → find exact subject
+        # → get local email_id
+        # → pass email_id to GenerateReplyTool
+        #
+        # The LLM never invents the email_id.
+        # --------------------------------------------------
+
+        if (
+            plan.tool_name == "generate_reply"
+            and not tool_args.get("email_id")
+            and tool_args.get("email_reference")
+        ):
+
+            if user_id is None:
+
+                return {
+                    "answer": (
+                        "I couldn't resolve the email because "
+                        "the user identity is missing."
+                    ),
+                    "tool": plan.tool_name,
+                    "tool_result": None,
+                    "error": {
+                        "code": "INVALID_INPUT",
+                        "message": (
+                            "User identity is required "
+                            "to resolve the email."
+                        ),
+                    },
+                    "query_plan": plan.model_dump(),
+                }
+
+            email_id, resolution_error = (
+                await self._resolve_email_reference(
+                    email_reference=tool_args["email_reference"],
+                    user_id=user_id,
+                )
+            )
+
+            if resolution_error:
+
+                return {
+                    "answer": resolution_error,
+                    "tool": plan.tool_name,
+                    "tool_result": None,
+                    "error": {
+                        "code": "EMAIL_NOT_FOUND",
+                        "message": resolution_error,
+                    },
+                    "query_plan": plan.model_dump(),
+                }
+
+            tool_args["email_id"] = email_id
+
+            logger.info(
+                "Resolved email reference '%s' "
+                "to email_id=%s.",
+                tool_args["email_reference"],
+                email_id,
+            )
+
+        # --------------------------------------------------
+        # Execute tool
+        # --------------------------------------------------
 
         try:
 
             tool_result = await self.tool_executor.execute(
-            tool_name=plan.tool_name,
-            **tool_args,
-        )
+                tool_name=plan.tool_name,
+                **tool_args,
+            )
 
         except Exception as exc:
 
             logger.exception(
-            "Tool '%s' execution failed.",
-            plan.tool_name,
-        )
+                "Tool '%s' execution failed.",
+                plan.tool_name,
+            )
 
             error_message = str(exc)
 
             return {
-            "answer": error_message,
-            "tool": plan.tool_name,
-            "tool_result": None,
-            "error": self._build_tool_error(
-                message=error_message,
-                tool_name=plan.tool_name,
-            ),
-            "query_plan": plan.model_dump(),
-        }
+                "answer": error_message,
+                "tool": plan.tool_name,
+                "tool_result": None,
+                "error": self._build_tool_error(
+                    message=error_message,
+                    tool_name=plan.tool_name,
+                ),
+                "query_plan": plan.model_dump(),
+            }
 
-    # --------------------------------------------------
-    # Tool returned an explicit failure
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Tool returned an explicit failure
+        # --------------------------------------------------
 
         if not tool_result.get("success"):
 
             error_message = tool_result.get(
-            "error",
-            "An unknown tool error occurred.",
-        )
+                "error",
+                "An unknown tool error occurred.",
+            )
 
-        # Handle either:
-        #
-        # error = "some message"
-        #
-        # or:
-        #
-        # error = {
-        #     "code": "...",
-        #     "message": "..."
-        # }
-        #
+            # Handle either:
+            #
+            # error = "some message"
+            #
+            # or:
+            #
+            # error = {
+            #     "code": "...",
+            #     "message": "..."
+            # }
 
             if isinstance(error_message, dict):
 
                 error = {
-                "code": error_message.get(
-                    "code",
-                    "TOOL_ERROR",
-                ),
-                "message": error_message.get(
-                    "message",
-                    "An unknown tool error occurred.",
-                ),
-            }
+                    "code": error_message.get(
+                        "code",
+                        "TOOL_ERROR",
+                    ),
+                    "message": error_message.get(
+                        "message",
+                        "An unknown tool error occurred.",
+                    ),
+                }
 
             else:
 
                 error = self._build_tool_error(
-                message=str(error_message),
-                tool_name=plan.tool_name,
-            )
+                    message=str(error_message),
+                    tool_name=plan.tool_name,
+                )
 
             return {
-            "answer": error["message"],
-            "tool": plan.tool_name,
-            "tool_result": None,
-            "error": error,
-            "query_plan": plan.model_dump(),
-        }
+                "answer": error["message"],
+                "tool": plan.tool_name,
+                "tool_result": None,
+                "error": error,
+                "query_plan": plan.model_dump(),
+            }
 
-    # --------------------------------------------------
-    # Extract actual tool result
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Extract actual tool result
+        # --------------------------------------------------
 
         result = tool_result.get(
-        "result",
-        {},
-    )
+            "result",
+            {},
+        )
 
-    # --------------------------------------------------
-    # Normalize successful result
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Build conversation/action metadata
+        # --------------------------------------------------
+
+        context_metadata: dict[str, Any] = {
+            "tool": plan.tool_name,
+            "action": plan.tool_name,
+        }
+
+        # --------------------------------------------------
+        # Normalize successful result
+        # --------------------------------------------------
 
         if isinstance(result, dict):
 
             structured_result = result
 
+            for key in (
+                "draft_id",
+                "email_id",
+                "approval_status",
+                "version",
+                "tone",
+                "gmail_draft_id",
+                "is_sent",
+            ):
+
+                if structured_result.get(key) is not None:
+                    context_metadata[key] = structured_result[key]
+
             answer = (
-            result.get("message")
-            or result.get("status")
-            or f"Action '{plan.tool_name}' "
-               "completed successfully."
-        )
+                result.get("message")
+                or result.get("status")
+                or f"Action '{plan.tool_name}' "
+                   "completed successfully."
+            )
 
         elif isinstance(result, str):
 
             structured_result = {
-            "details": result,
-        }
+                "details": result,
+            }
 
             answer = result
 
         else:
 
             structured_result = {
-            "details": result,
-        }
+                "details": result,
+            }
 
             answer = (
-            f"Action '{plan.tool_name}' "
-            "completed successfully."
-        )
+                f"Action '{plan.tool_name}' "
+                "completed successfully."
+            )
 
-    # --------------------------------------------------
-    # Build conversation/action metadata
-    # --------------------------------------------------
-
-        context_metadata: dict[str, Any] = {
-        "tool": plan.tool_name,
-        "action": plan.tool_name,
-    }
-
-    # --------------------------------------------------
-    # Preserve email_id
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Preserve email_id
+        # --------------------------------------------------
 
         email_id = None
 
         if isinstance(structured_result, dict):
 
             email_id = structured_result.get(
-            "email_id"
-        )
+                "email_id"
+            )
 
         if email_id is None:
 
-            email_id = plan.tool_arguments.get(
-            "email_id"
-        )
+            email_id = tool_args.get(
+                "email_id"
+            )
 
         if email_id is not None:
 
             context_metadata["email_id"] = email_id
 
-    # --------------------------------------------------
-    # Preserve draft_id
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Preserve draft_id
+        # --------------------------------------------------
 
         draft_id = None
 
         if isinstance(structured_result, dict):
 
             draft_id = structured_result.get(
-            "draft_id"
-        )
+                "draft_id"
+            )
 
         if draft_id is None:
 
-            draft_id = plan.tool_arguments.get(
-            "draft_id"
-        )
+            draft_id = tool_args.get(
+                "draft_id"
+            )
 
         if draft_id is not None:
 
             context_metadata["draft_id"] = draft_id
 
         logger.debug(
-        "Structured tool state: %s",
-        context_metadata,
-    )
+            "Structured tool state: %s",
+            context_metadata,
+        )
 
-    # --------------------------------------------------
-    # Successful response
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # Successful response
+        # --------------------------------------------------
 
         return {
-        "answer": answer,
-        "tool": plan.tool_name,
-        "tool_result": structured_result,
-        "error": None,
-        "query_plan": plan.model_dump(),
-        "context_metadata": context_metadata,
-    }
+            "answer": answer,
+            "tool": plan.tool_name,
+            "tool_result": structured_result,
+            "error": None,
+            "query_plan": plan.model_dump(),
+            "context_metadata": context_metadata,
+        }
     def _build_tool_error(
     self,
     message: str,
@@ -751,3 +834,64 @@ Output ONLY the direct response to the user.
             "retrieved_emails": retrieved_emails,
             "query_plan": plan.model_dump(),
         }
+    async def _resolve_email_reference(
+        self,
+        email_reference: str,
+        user_id: int,
+    ) -> tuple[int | None, str | None]:
+
+        service = EmailToolService(self.db)
+
+        results = service.search_emails(
+            query=email_reference,
+            user_id=user_id,
+            limit=10,
+        )
+
+        normalized_reference = (
+            email_reference.strip().casefold()
+        )
+
+        exact_matches = [
+            email
+            for email in results
+            if (
+                isinstance(
+                    email.get("subject"),
+                    str,
+                )
+                and email["subject"]
+                .strip()
+                .casefold()
+                == normalized_reference
+            )
+        ]
+
+        # Exactly one matching subject
+        if len(exact_matches) == 1:
+
+            return (
+                exact_matches[0]["email_id"],
+                None,
+            )
+
+        # Multiple matching subjects
+        if len(exact_matches) > 1:
+
+            return (
+                None,
+                (
+                    f'I found multiple emails with '
+                    f'the subject "{email_reference}". '
+                    "Please specify which one you mean."
+                ),
+            )
+
+        # No matching subject
+        return (
+            None,
+            (
+                f'I couldn\'t find an email with '
+                f'the subject "{email_reference}".'
+            ),
+        )

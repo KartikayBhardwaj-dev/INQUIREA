@@ -10,26 +10,129 @@ export const DRAFT_STATUS = Object.freeze({
 });
 
 
+// ============================================================
+// Normalize status
+// ============================================================
+
+function normalizeStatus(status) {
+  if (!status) {
+    return null;
+  }
+
+  const normalized =
+    String(status)
+      .trim()
+      .toUpperCase();
+
+  if (
+    Object.values(DRAFT_STATUS).includes(
+      normalized
+    )
+  ) {
+    return normalized;
+  }
+
+  return null;
+}
+
+
+// ============================================================
+// Empty draft state
+// ============================================================
+
 export function createEmptyDraftState() {
   return {
-  draft_id: null,
-  email_id: null,
+    draft_id: null,
+    email_id: null,
 
-  content: "",
+    // Actual LLM-generated reply
+    draft: "",
 
-  version: null,
+    // Legacy/UI alias
+    content: "",
 
-  tone: null,
+    version: null,
 
-  // Approval is independent from Gmail persistence.
-  approval_status:
-    DRAFT_STATUS.PENDING,
+    tone: null,
 
-  // null = not saved to Gmail.
-  gmail_draft_id: null,
+    approval_status:
+      DRAFT_STATUS.PENDING,
 
-  is_sent: false,
+    gmail_draft_id: null,
 
-  sent_at: null,
-};
+    is_sent: false,
+
+    sent_at: null,
+  };
+}
+
+
+// ============================================================
+// Create normalized draft state
+// ============================================================
+
+export function createDraftState(data = {}) {
+  const empty =
+    createEmptyDraftState();
+
+  return {
+    ...empty,
+
+    draft_id:
+      data.draft_id ??
+      data.draftId ??
+      null,
+
+    email_id:
+      data.email_id ??
+      data.emailId ??
+      null,
+
+    draft:
+      data.draft ??
+      data.content ??
+      data.draft_content ??
+      data.body ??
+      "",
+
+    content:
+      data.draft ??
+      data.content ??
+      data.draft_content ??
+      data.body ??
+      "",
+
+    version:
+      data.version ??
+      null,
+
+    tone:
+      data.tone ??
+      null,
+
+    approval_status:
+      normalizeStatus(
+        data.approval_status ??
+        data.approvalStatus ??
+        data.status
+      ) ??
+      DRAFT_STATUS.PENDING,
+
+    gmail_draft_id:
+      data.gmail_draft_id ??
+      data.gmailDraftId ??
+      null,
+
+    is_sent:
+      Boolean(
+        data.is_sent ??
+        data.isSent ??
+        false
+      ),
+
+    sent_at:
+      data.sent_at ??
+      data.sentAt ??
+      null,
+  };
 }

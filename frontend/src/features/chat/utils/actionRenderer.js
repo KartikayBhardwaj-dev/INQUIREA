@@ -4,42 +4,53 @@ import {
 } from "../models/draftState";
 
 
+// ============================================================
+// Normalize backend tool action
+// ============================================================
+
 export function normalizeToolAction(
   response,
   currentDraft = null
 ) {
   const tool =
-    response?.tool ?? null;
+    response?.tool ??
+    null;
 
   const toolResult =
     response?.tool_result ??
+    response?.toolResult ??
     null;
+
 
   if (!tool) {
     return null;
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // GENERATE REPLY
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "generate_reply") {
+
     if (!toolResult) {
       return null;
     }
 
-    const draft = createDraftState({
-      ...toolResult,
+    const draft =
+      createDraftState({
+        ...toolResult,
 
-      approval_status:
-        toolResult.approval_status ??
-        DRAFT_STATUS.PENDING,
+        approval_status:
+          toolResult.approval_status ??
+          toolResult.approvalStatus ??
+          DRAFT_STATUS.PENDING,
 
-      is_sent:
-        toolResult.is_sent ??
-        false,
-    });
+        is_sent:
+          toolResult.is_sent ??
+          toolResult.isSent ??
+          false,
+      });
 
     return {
       type: "draft",
@@ -49,51 +60,73 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
-  // REWRITE REPLY
-  // --------------------------------------------------
+  // ----------------------------------------------------------
+  // REWRITE / REGENERATE REPLY
+  // ----------------------------------------------------------
 
-  if (tool === "rewrite_reply") {
+  if (
+    tool === "rewrite_reply" ||
+    tool === "regenerate_reply"
+  ) {
+
     if (!toolResult) {
       return null;
     }
 
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...toolResult,
+    const draft =
+      createDraftState({
+        ...toolResult,
 
-      approval_status:
-        toolResult.approval_status ??
-        currentDraft?.approval_status ??
-        DRAFT_STATUS.PENDING,
+        approval_status:
+          toolResult.approval_status ??
+          toolResult.approvalStatus ??
+          DRAFT_STATUS.PENDING,
 
-      is_sent:
-        toolResult.is_sent ??
-        currentDraft?.is_sent ??
-        false,
-    });
+        // A rewritten version must not inherit
+        // the previous Gmail/send state.
+        gmail_draft_id: null,
+
+        is_sent: false,
+
+        sent_at: null,
+      });
 
     return {
       type: "draft",
-      action: "rewrite_reply",
+      action: tool,
       draft,
     };
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // EDIT DRAFT
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "edit_draft") {
+
     if (!toolResult) {
       return null;
     }
 
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...toolResult,
-    });
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...toolResult,
+
+        // Editing creates a new unsaved version.
+        approval_status:
+          DRAFT_STATUS.PENDING,
+
+        gmail_draft_id:
+          null,
+
+        is_sent:
+          false,
+
+        sent_at:
+          null,
+      });
 
     return {
       type: "draft",
@@ -103,22 +136,26 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // APPROVE
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "approve_draft") {
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...(toolResult ?? {}),
 
-      approval_status:
-        DRAFT_STATUS.APPROVED,
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...(toolResult ?? {}),
 
-      is_sent:
-        currentDraft?.is_sent ??
-        false,
-    });
+        approval_status:
+          DRAFT_STATUS.APPROVED,
+
+        is_sent:
+          false,
+
+        sent_at:
+          null,
+      });
 
     return {
       type: "draft",
@@ -128,21 +165,29 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // REJECT
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "reject_draft") {
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...(toolResult ?? {}),
 
-      approval_status:
-        DRAFT_STATUS.REJECTED,
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...(toolResult ?? {}),
 
-      is_sent:
-        false,
-    });
+        approval_status:
+          DRAFT_STATUS.REJECTED,
+
+        gmail_draft_id:
+          null,
+
+        is_sent:
+          false,
+
+        sent_at:
+          null,
+      });
 
     return {
       type: "draft",
@@ -152,15 +197,22 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // SAVE DRAFT
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "save_draft") {
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...(toolResult ?? {}),
-    });
+
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...(toolResult ?? {}),
+
+        // Saving to Gmail does NOT approve the draft.
+        approval_status:
+          currentDraft?.approval_status ??
+          DRAFT_STATUS.APPROVED,
+      });
 
     return {
       type: "draft",
@@ -170,15 +222,17 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // UPDATE DRAFT
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "update_draft") {
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...(toolResult ?? {}),
-    });
+
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...(toolResult ?? {}),
+      });
 
     return {
       type: "draft",
@@ -188,26 +242,28 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // SEND REPLY
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   if (tool === "send_reply") {
-    const draft = createDraftState({
-      ...(currentDraft ?? {}),
-      ...(toolResult ?? {}),
 
-      approval_status:
-        DRAFT_STATUS.APPROVED,
+    const draft =
+      createDraftState({
+        ...(currentDraft ?? {}),
+        ...(toolResult ?? {}),
 
-      is_sent:
-        true,
+        approval_status:
+          DRAFT_STATUS.SENT,
 
-      sent_at:
-        toolResult?.sent_at ??
-        toolResult?.sentAt ??
-        new Date().toISOString(),
-    });
+        is_sent:
+          true,
+
+        sent_at:
+          toolResult?.sent_at ??
+          toolResult?.sentAt ??
+          new Date().toISOString(),
+      });
 
     return {
       type: "draft",
@@ -217,9 +273,9 @@ export function normalizeToolAction(
   }
 
 
-  // --------------------------------------------------
+  // ----------------------------------------------------------
   // UNKNOWN TOOL
-  // --------------------------------------------------
+  // ----------------------------------------------------------
 
   return {
     type: "tool",

@@ -31,52 +31,62 @@ class EmailToolService:
     # ---------------------------------------------------------
 
     def search_emails(
-        self,
-        query: str,
-        limit: int = 5,
-        category: str | None = None,
-        priority: str | None = None,
-        sender: str | None = None,
-        requires_reply: bool | None = None,
-        sort_by: str = "relevance",
-        date_from: str | None = None,
-        date_to: str | None = None,
-    ) -> list[dict]:
+    self,
+    query: str,
+    user_id: int,
+    limit: int = 5,
+    category: str | None = None,
+    priority: str | None = None,
+    sender: str | None = None,
+    requires_reply: bool | None = None,
+    sort_by: str = "relevance",
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[dict]:
+
+
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
 
         emails = self.retriever.retrieve(
-            query=query,
-            limit=limit,
-            category=category,
-            priority=priority,
-            sender=sender,
-            requires_reply=requires_reply,
-            sort_by=sort_by,
-            date_from=date_from,
-            date_to=date_to,
-        )
+        query=query,
+        limit=limit,
+        user_id=user_id,          # IMPORTANT
+        category=category,
+        priority=priority,
+        sender=sender,
+        requires_reply=requires_reply,
+        sort_by=sort_by,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
-        email_data = self.retriever.load_email_data(
-            emails,
-        )
+        email_data = self.retriever.load_email_data(emails)
 
         return [
-            self._serialize_email(email, intelligence)
-            for email, intelligence in email_data
-        ]
-
+        self._serialize_email(email, intelligence)
+        for email, intelligence in email_data
+    ]
     # ---------------------------------------------------------
     # Get Single Email
     # ---------------------------------------------------------
 
     def get_email(
-        self,
-        email_id: int,
-    ) -> dict | None:
+    self,
+    email_id: int,
+    user_id: int,
+) -> dict | None:
+
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
 
         results = self.search_emails(
-            query="",
-            limit=100,
-        )
+        query="",
+        user_id=user_id,
+        limit=100,
+    )
 
         for email in results:
             if email["email_id"] == email_id:
@@ -103,15 +113,20 @@ class EmailToolService:
     # ---------------------------------------------------------
 
     def list_reply_required(
-        self,
-        limit: int = 20,
-    ) -> list[dict]:
+    self,
+    user_id: int,
+    limit: int = 20,
+) -> list[dict]:
+
+        if user_id is None:
+            raise ValueError("user_id is required.")
 
         return self.search_emails(
-            query="",
-            limit=limit,
-            requires_reply=True,
-        )
+        query="",
+        user_id=user_id,
+        limit=limit,
+        requires_reply=True,
+    )
 
     # ---------------------------------------------------------
     # Serialization Helper
@@ -145,7 +160,7 @@ class EmailToolService:
 
         # Actual Gmail message ID
         "gmail_message_id": email.gmail_message_id,
-
+        "gmail_thread_id": email.gmail_thread_id,
         "subject": email.subject,
         "sender": email.sender,
         "recipient": email.recipient,

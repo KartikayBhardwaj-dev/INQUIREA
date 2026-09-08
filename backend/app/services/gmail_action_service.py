@@ -217,6 +217,7 @@ class GmailActionService:
                     subject=f"Re: {email.subject}",
                     body=draft.draft,
                     thread_id=email.gmail_thread_id,
+                    message_id=email.gmail_message_id,
                 )
 
                 gmail_draft_id = gmail_result.get("id")
@@ -308,6 +309,7 @@ class GmailActionService:
                     subject=f"Re: {email.subject}",
                     body=draft.draft,
                     thread_id=email.gmail_thread_id,
+                    message_id=email.gmail_message_id,
                 )
 
                 gmail_draft_id = gmail_result.get(

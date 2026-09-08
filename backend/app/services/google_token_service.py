@@ -52,8 +52,6 @@ class GoogleTokenService:
             + timedelta(seconds=expires_in)
         )
 
-        db.commit()
-
-        db.refresh(user)
+        db.flush()
 
         return user.google_access_token

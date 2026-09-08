@@ -58,6 +58,7 @@ class ChatToolExecutor:
         ],
         "rewrite_reply": [
             "draft_id",
+            "instruction"
         ],
         "edit_draft": [
             "draft_id",
@@ -65,8 +66,9 @@ class ChatToolExecutor:
         ],
     }
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, user_id: int | None = None):
         self.db = db
+        self.user_id = user_id
 
     async def execute(
         self,
@@ -114,7 +116,15 @@ class ChatToolExecutor:
 
             if "db" not in kwargs:
                 kwargs["db"] = self.db
+            if (
 
+    self.user_id is not None
+
+    and "user_id" not in kwargs
+
+):
+
+                kwargs["user_id"] = self.user_id
             # -------------------------------------------------
             # Required argument validation
             #
@@ -130,7 +140,7 @@ class ChatToolExecutor:
             missing = [
                 argument
                 for argument in required_args
-                if kwargs.get(argument) is None
+                if self._is_missing(kwargs.get(argument))
             ]
 
             if missing:
@@ -235,3 +245,12 @@ class ChatToolExecutor:
             result["execution_time_ms"] = elapsed
 
             return result
+    @staticmethod
+    def _is_missing(value: Any) -> bool:
+        if value is None:
+            return True
+
+        if isinstance(value, str) and not value.strip():
+            return True
+
+        return False

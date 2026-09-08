@@ -20,7 +20,7 @@ import {
 
 import {
   getFriendlyChatError,
-} from "../utils/errorMapper";
+} from "../../../utils/errorMapper";
 
 import {
   createEmptyDraftState,
@@ -74,6 +74,25 @@ function getToolResult(data) {
     data?.tool_result ??
     data?.toolResult ??
     null
+  );
+}
+
+
+// ============================================================
+// Draft action detection
+// ============================================================
+
+function isDraftAction(tool) {
+  return (
+    tool === "generate_reply" ||
+    tool === "rewrite_reply" ||
+    tool === "regenerate_reply" ||
+    tool === "edit_draft" ||
+    tool === "approve_draft" ||
+    tool === "reject_draft" ||
+    tool === "save_draft" ||
+    tool === "update_draft" ||
+    tool === "send_reply"
   );
 }
 
@@ -213,13 +232,25 @@ function normalizeAssistantMessage(
   data,
   currentDraft
 ) {
-  const retrievedEmails =
-    getRetrievedEmails(data)
-      .map(normalizeEmail)
-      .filter(
-        (email) =>
-          email?.id != null
-      );
+  const tool =
+    getTool(data);
+
+  /*
+   * Draft-related actions may internally search/retrieve
+   * emails in order to resolve the target email.
+   *
+   * Those emails must NOT be rendered as EmailCards.
+   *
+   * The actual email is still resolved on the backend.
+   */
+  const retrievedEmails = isDraftAction(tool)
+    ? []
+    : getRetrievedEmails(data)
+        .map(normalizeEmail)
+        .filter(
+          (email) =>
+            email?.id != null
+        );
 
   return {
     id:
@@ -582,23 +613,40 @@ export default function useChat() {
                   "assistant";
 
 
-                const emails =
-                  (
-                    message.retrieved_emails ??
-                    message.retrievedEmails ??
-                    message.emails ??
-                    []
-                  )
-                    .map(normalizeEmail)
-                    .filter(
-                      (email) =>
-                        email?.id != null
-                    );
-
+                // ==================================================
+                // IMPORTANT:
+                // Determine the tool BEFORE processing emails.
+                // ==================================================
 
                 const tool =
                   message.tool ??
+                  message.tool_name ??
+                  message.toolName ??
                   null;
+
+
+                /*
+                 * Draft-related history messages can contain
+                 * retrieved emails because the backend searched
+                 * for the email referenced by the user.
+                 *
+                 * Those emails are needed for resolution, but
+                 * they should NOT become EmailCards in the UI.
+                 */
+                const emails =
+                  isDraftAction(tool)
+                    ? []
+                    : (
+                        message.retrieved_emails ??
+                        message.retrievedEmails ??
+                        message.emails ??
+                        []
+                      )
+                        .map(normalizeEmail)
+                        .filter(
+                          (email) =>
+                            email?.id != null
+                        );
 
 
                 const toolResult =
@@ -871,6 +919,18 @@ export default function useChat() {
               )
             );
 
+            /*
+             * IMPORTANT:
+             *
+             * Returning null tells DraftCard that
+             * the backend action failed.
+             *
+             * This keeps:
+             *
+             * - Edit mode open after failed edit
+             * - Send confirmation modal open after failed send
+             */
+            return null;
           }
 
 
@@ -1142,6 +1202,39 @@ export default function useChat() {
         }
 
 
+        if (
+          draft.approval_status !==
+          "APPROVED"
+        ) {
+
+          setError(
+            "Draft must be approved before sending."
+          );
+
+          return null;
+        }
+
+
+        if (!draft.gmail_draft_id) {
+
+          setError(
+            "Draft must be saved to Gmail before sending."
+          );
+
+          return null;
+        }
+
+
+        if (draft.is_sent) {
+
+          setError(
+            "This draft has already been sent."
+          );
+
+          return null;
+        }
+
+
         return sendMessage(
           `Send draft ${draft.draft_id}`,
           "sendDraft"
@@ -1150,6 +1243,9 @@ export default function useChat() {
       },
       [
         draft?.draft_id,
+        draft?.approval_status,
+        draft?.gmail_draft_id,
+        draft?.is_sent,
         sendMessage,
       ]
     );
