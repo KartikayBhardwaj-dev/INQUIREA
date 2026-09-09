@@ -48,349 +48,169 @@ function normalizeStatus(status) {
 // Apply backend action
 // ============================================================
 
-export function applyDraftAction(
-  currentDraft,
-  tool,
-  toolResult
-) {
-  const previous =
-    currentDraft ??
-    createEmptyDraftState();
+export function applyDraftAction(currentDraft, tool, toolResult) {
+  const previous = currentDraft ?? createEmptyDraftState();
+  const result = toolResult ?? {};
 
-  if (
-    !tool ||
-    !toolResult ||
-    typeof toolResult !== "object"
-  ) {
-    return previous;
+  switch (tool) {
+    case "generate_reply": {
+      const content =
+        result.draft ??
+        result.content ??
+        result.draft_content ??
+        "";
+
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        draft: content,
+        content,
+        version: result.version ?? 1,
+        tone: result.tone ?? previous.tone,
+        approval_status:
+          result.approval_status ?? DRAFT_STATUS.PENDING,
+        gmail_draft_id: result.gmail_draft_id ?? null,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "rewrite_reply":
+    case "regenerate_reply": {
+      const content =
+        result.draft ??
+        result.content ??
+        result.draft_content ??
+        "";
+
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        draft: content,
+        content,
+        version: result.version ?? previous.version,
+        tone: result.tone ?? previous.tone,
+        approval_status:
+          result.approval_status ?? DRAFT_STATUS.PENDING,
+        gmail_draft_id: null,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "edit_draft": {
+      const content =
+        result.draft ??
+        result.content ??
+        result.draft_content ??
+        "";
+
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        draft: content,
+        content,
+        version: result.version ?? previous.version,
+        tone: result.tone ?? previous.tone,
+        approval_status: DRAFT_STATUS.PENDING,
+        gmail_draft_id: null,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "update_draft": {
+      const content =
+        result.draft ??
+        result.content ??
+        result.draft_content ??
+        previous.draft ??
+        previous.content ??
+        "";
+
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        draft: content,
+        content,
+        version: result.version ?? previous.version,
+        tone: result.tone ?? previous.tone,
+        approval_status:
+          result.approval_status ?? DRAFT_STATUS.PENDING,
+        gmail_draft_id:
+          result.gmail_draft_id ?? previous.gmail_draft_id,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "approve_draft": {
+      const content =
+        result.draft ??
+        result.content ??
+        result.draft_content ??
+        previous.draft ??
+        previous.content ??
+        "";
+
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        draft: content,
+        content,
+        version: result.version ?? previous.version,
+        tone: result.tone ?? previous.tone,
+        approval_status: DRAFT_STATUS.APPROVED,
+        gmail_draft_id:
+          result.gmail_draft_id ?? previous.gmail_draft_id,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "reject_draft": {
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        approval_status: DRAFT_STATUS.REJECTED,
+        gmail_draft_id: null,
+        is_sent: false,
+        sent_at: null,
+      };
+    }
+
+    case "save_draft": {
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        gmail_draft_id:
+          result.gmail_draft_id ?? previous.gmail_draft_id,
+      };
+    }
+
+    case "send_reply": {
+      return {
+        ...previous,
+        draft_id: result.draft_id ?? previous.draft_id,
+        email_id: result.email_id ?? previous.email_id,
+        approval_status: DRAFT_STATUS.SENT,
+        gmail_draft_id:
+          result.gmail_draft_id ?? previous.gmail_draft_id,
+        is_sent: true,
+        sent_at: result.sent_at ?? new Date().toISOString(),
+      };
+    }
+
+    default:
+      return previous;
   }
-
-
-  const next = {
-    ...previous,
-  };
-
-
-  // ----------------------------------------------------------
-  // GENERATE REPLY
-  // ----------------------------------------------------------
-
-  if (tool === "generate_reply") {
-  return {
-    draft_id:
-      firstDefined(
-        toolResult.draft_id,
-        toolResult.draftId
-      ),
-
-    email_id:
-      firstDefined(
-        toolResult.email_id,
-        toolResult.emailId
-      ),
-
-    content:
-      firstDefined(
-        toolResult.content,
-        toolResult.draft_content,
-        toolResult.body,
-        ""
-      ),
-
-    version:
-      firstDefined(
-        toolResult.version,
-        null
-      ),
-
-    tone:
-      firstDefined(
-        toolResult.tone,
-        "professional"
-      ),
-
-    approval_status:
-      normalizeStatus(
-        toolResult.approval_status ??
-        toolResult.status
-      ) ??
-      DRAFT_STATUS.PENDING,
-
-    gmail_draft_id:
-      firstDefined(
-        toolResult.gmail_draft_id,
-        toolResult.gmailDraftId
-      ),
-
-    is_sent:
-      Boolean(toolResult.is_sent ?? false),
-
-    sent_at:
-      firstDefined(
-        toolResult.sent_at,
-        toolResult.sentAt
-      ),
-  };
 }
-
-
-  // ----------------------------------------------------------
-  // REWRITE REPLY
-  // ----------------------------------------------------------
-
-  // ----------------------------------------------------------
-// REWRITE / REGENERATE REPLY
-//
-// IMPORTANT:
-// Regeneration creates a NEW backend draft version.
-// The backend response is authoritative.
-//
-// Do NOT blindly merge the old draft into the new one.
-// ----------------------------------------------------------
-
-if (
-  tool === "rewrite_reply" ||
-  tool === "regenerate_reply"
-) {
-
-  return {
-    draft_id:
-      firstDefined(
-        toolResult.draft_id,
-        toolResult.draftId
-      ),
-
-    email_id:
-      firstDefined(
-        toolResult.email_id,
-        toolResult.emailId
-      ),
-
-    content:
-      firstDefined(
-        toolResult.content,
-        toolResult.draft_content,
-        toolResult.body,
-        ""
-      ),
-
-    version:
-      firstDefined(
-        toolResult.version,
-        1
-      ),
-
-    tone:
-      firstDefined(
-        toolResult.tone,
-        "professional"
-      ),
-
-    approval_status:
-      normalizeStatus(
-        toolResult.approval_status ??
-        toolResult.status
-      ) ??
-      DRAFT_STATUS.PENDING,
-
-    // CRITICAL:
-    // Rewritten version has not been saved to Gmail.
-    gmail_draft_id: null,
-
-    is_sent: false,
-
-    sent_at: null,
-  };
-}
-
-  // ----------------------------------------------------------
-  // EDIT DRAFT
-  // ----------------------------------------------------------
-
-  if (tool === "edit_draft") {
-
-  return {
-    ...previous,
-
-    draft_id:
-      firstDefined(
-        toolResult.draft_id,
-        toolResult.draftId,
-        previous.draft_id
-      ),
-
-    email_id:
-      firstDefined(
-        toolResult.email_id,
-        toolResult.emailId,
-        previous.email_id
-      ),
-
-    content:
-      firstDefined(
-        toolResult.content,
-        toolResult.draft_content,
-        toolResult.body,
-        previous.content
-      ),
-
-    version:
-      firstDefined(
-        toolResult.version,
-        previous.version
-          ? previous.version + 1
-          : 1
-      ),
-
-    approval_status:
-      DRAFT_STATUS.PENDING,
-
-    // Edited version must be saved again.
-    gmail_draft_id: null,
-
-    is_sent: false,
-
-    sent_at: null,
-  };
-}
-
-
-  // ----------------------------------------------------------
-  // APPROVE
-  // ----------------------------------------------------------
-
-  // ----------------------------------------------------------
-// APPROVE
-// ----------------------------------------------------------
-
-if (tool === "approve_draft") {
-
-  return {
-    ...previous,
-
-    draft_id:
-      firstDefined(
-        toolResult.draft_id,
-        toolResult.draftId,
-        previous.draft_id
-      ),
-
-    approval_status:
-      normalizeStatus(
-        toolResult.approval_status ??
-        toolResult.status
-      ) ??
-      DRAFT_STATUS.APPROVED,
-
-    is_sent:
-      Boolean(
-        toolResult.is_sent ??
-        false
-      ),
-
-    sent_at:
-      firstDefined(
-        toolResult.sent_at,
-        toolResult.sentAt,
-        null
-      ),
-  };
-}
-
-  // ----------------------------------------------------------
-  // REJECT
-  // ----------------------------------------------------------
-
-  if (tool === "reject_draft") {
-
-    return {
-      ...previous,
-
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
-
-      approval_status:
-        DRAFT_STATUS.REJECTED,
-
-      is_sent: false,
-
-      sent_at: null,
-    };
-  }
-
-
-  // ----------------------------------------------------------
-  // SAVE
-  // ----------------------------------------------------------
-
-  if (tool === "save_draft") {
-
-    return {
-      ...previous,
-
-      draft_id:
-        firstDefined(
-          toolResult.draft_id,
-          toolResult.draftId,
-          previous.draft_id
-        ),
-
-      gmail_draft_id:
-        firstDefined(
-          toolResult.gmail_draft_id,
-          toolResult.gmailDraftId,
-          previous.gmail_draft_id
-        ),
-    };
-  }
-
-
-  // ----------------------------------------------------------
-  // SEND
-  // ----------------------------------------------------------
-
-  if (tool === "send_reply") {
-  return {
-    ...previous,
-
-    draft_id:
-      firstDefined(
-        toolResult.draft_id,
-        toolResult.draftId,
-        previous.draft_id
-      ),
-
-    gmail_draft_id:
-      firstDefined(
-        toolResult.gmail_draft_id,
-        toolResult.gmailDraftId,
-        previous.gmail_draft_id
-      ),
-
-    approval_status:
-      DRAFT_STATUS.APPROVED,
-
-    is_sent: true,
-
-    sent_at:
-      firstDefined(
-        toolResult.sent_at,
-        toolResult.sentAt,
-        new Date().toISOString()
-      ),
-  };
-}
-
-
-  // Unknown action → don't touch draft.
-  return next;
-}
-
-
 export {
   DRAFT_STATUS,
   createEmptyDraftState,

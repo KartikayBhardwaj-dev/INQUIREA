@@ -20,7 +20,13 @@ export function normalizeToolAction(
     response?.tool_result ??
     response?.toolResult ??
     null;
+  console.log("NORMALIZE TOOL ACTION:", {
 
+  tool,
+
+  toolResult,
+
+});
 
   if (!tool) {
     return null;
@@ -52,11 +58,19 @@ export function normalizeToolAction(
           false,
       });
 
-    return {
-      type: "draft",
-      action: "generate_reply",
-      draft,
-    };
+    const action = {
+
+  type: "draft",
+
+  action: "generate_reply",
+
+  draft,
+
+};
+
+console.log("GENERATED DRAFT ACTION:", action);
+
+return action;
   }
 
 

@@ -182,9 +182,11 @@ When the user says:
 "make it shorter"
 "make the draft shorter"
 "make this reply professional"
+"add my phone number"
+"change the ending"
+"regenerate it"
 "approve it"
 "reject it"
-"save it"
 "send it"
 
 and the most recent relevant context contains:
@@ -289,10 +291,7 @@ Available tools:
 - edit_draft
 - approve_draft
 - reject_draft
-- save_draft
-- update_draft
 - send_reply
-
 Use a tool when the user wants an ACTION.
 
 ========================================================
@@ -403,37 +402,6 @@ REJECT
 
 Use the most recent relevant draft_id.
 
-========================================================
-SAVE
-========================================================
-
-"Save draft 15"
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "save_draft",
-    "tool_arguments": {{{{
-        "draft_id": 15
-    }}}}
-}}}}
-
-"Save it"
-
-Use the most recent relevant draft_id.
-
-========================================================
-UPDATE
-========================================================
-
-"Update draft 15"
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "update_draft",
-    "tool_arguments": {{{{
-        "draft_id": 15
-    }}}}
-}}}}
 
 ========================================================
 SEND
@@ -574,36 +542,56 @@ reasoning must always be present.
     def _get_context_ids(
     conversation: list[dict[str, Any]],
 ) -> dict[str, Any]:
-        
-        
+    
+        """
+    Extract the most recent draft and email context independently.
+
+    Draft context and email context are intentionally tracked
+    separately because a later email-related action should not
+    accidentally replace the current draft reference.
+    """
+
+        context: dict[str, Any] = {
+        "tool": None,
+        "draft_id": None,
+        "email_id": None,
+    }
 
         for message in reversed(conversation):
-
             metadata = message.get("metadata")
 
             if not isinstance(metadata, dict):
                 continue
 
-            tool = (
-            metadata.get("tool")
-            or metadata.get("action")
-        )
+            if context["draft_id"] is None:
+                draft_id = metadata.get("draft_id")
 
-            draft_id = metadata.get("draft_id")
-            email_id = metadata.get("email_id")
+                if draft_id is not None:
+                    context["draft_id"] = draft_id
+
+            if context["email_id"] is None:
+                email_id = metadata.get("email_id")
+
+                if email_id is not None:
+                    context["email_id"] = email_id
+
+            if context["tool"] is None:
+                tool = (
+                metadata.get("tool")
+                or metadata.get("action")
+            )
+
+                if tool is not None:
+                    context["tool"] = tool
 
             if (
-            tool is not None
-            or draft_id is not None
-            or email_id is not None
+            context["draft_id"] is not None
+            and context["email_id"] is not None
+            and context["tool"] is not None
         ):
-                return {
-                "tool": tool,
-                "draft_id": draft_id,
-                "email_id": email_id,
-            }
+                break
 
-        return {}
+        return context
     def _extract_email_reference(self, question: str) -> str | None:
         match = re.search(
         r'\bemail\b(?:\s+(?:titled|called|named))?\s*["\']([^"\']+)["\']',
@@ -615,6 +603,64 @@ reasoning must always be present.
             return match.group(1).strip()
 
         return None
+    def _detect_generate_reply_action(
+    self,
+    question: str,
+    email_reference: str | None,
+    context: dict[str, Any],
+    explicit_ids: dict[str, int],
+) -> tuple[str | None, dict[str, Any]]:
+        
+        """
+    Deterministically detect requests to generate a reply.
+
+    Supports:
+    - Generate a reply to email 10
+    - Generate a reply to the email "4 new image styles to try"
+    - Write a reply to this email
+    - Draft a response to this email
+    """
+
+        lowered = question.strip().lower()
+
+        generate_patterns = (
+        r"\bgenerate\b.*\breply\b",
+        r"\bwrite\b.*\breply\b",
+        r"\bdraft\b.*\breply\b",
+        r"\bcreate\b.*\breply\b",
+        r"\bcompose\b.*\breply\b",
+        r"\bwrite\b.*\bresponse\b",
+        r"\bdraft\b.*\bresponse\b",
+        r"\bcreate\b.*\bresponse\b",
+        r"\bcompose\b.*\bresponse\b",
+    )
+
+        if not any(
+        re.search(pattern, lowered)
+        for pattern in generate_patterns
+    ):
+            return None, {}
+
+        arguments: dict[str, Any] = {}
+
+    # Explicit email ID has highest priority.
+        if explicit_ids.get("email_id") is not None:
+            arguments["email_id"] = explicit_ids["email_id"]
+
+    # Natural-language subject/reference.
+        elif email_reference:
+            arguments["email_reference"] = email_reference
+
+    # Otherwise use the most recent email context.
+        elif context.get("email_id") is not None:
+            arguments["email_id"] = context["email_id"]
+
+        else:
+            return None, {}
+
+        arguments["tone"] = "professional"
+
+        return "generate_reply", arguments
     # ======================================================
     # EXPLICIT ID EXTRACTION
     # ======================================================
@@ -649,6 +695,126 @@ reasoning must always be present.
             )
 
         return ids
+    @staticmethod
+    def _detect_draft_action(
+    question: str,
+    context: dict[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+        
+        """
+    Deterministically detect common conversational actions
+    against the current draft.
+
+    This protects the draft workflow from LLM planning ambiguity.
+    """
+
+        draft_id = context.get("draft_id")
+
+        if draft_id is None:
+            return None, {}
+
+        text = question.strip()
+        lowered = text.lower()
+
+    # --------------------------------------------------
+    # APPROVE
+    # --------------------------------------------------
+
+        if re.search(
+        r"\b(approve|approved)\b",
+        lowered,
+    ):
+            return (
+            "approve_draft",
+            {
+                "draft_id": draft_id,
+            },
+        )
+
+    # --------------------------------------------------
+    # REJECT
+    # --------------------------------------------------
+
+        if re.search(
+        r"\b(reject|rejected|discard)\b",
+        lowered,
+    ):
+            return (
+            "reject_draft",
+            {
+                "draft_id": draft_id,
+            },
+        )
+
+    # --------------------------------------------------
+    # SEND
+    # --------------------------------------------------
+
+        if re.search(
+        r"\b(send|send it|send this)\b",
+        lowered,
+    ):
+            return (
+            "send_reply",
+            {
+                "draft_id": draft_id,
+            },
+        )
+
+    # --------------------------------------------------
+    # REGENERATE
+    # --------------------------------------------------
+
+        if re.search(
+        r"\b(regenerate|generate again|try again)\b",
+        lowered,
+    ):
+            return (
+            "rewrite_reply",
+            {
+                "draft_id": draft_id,
+                "instruction": (
+                    "Regenerate the draft while preserving "
+                    "the original intent and important information."
+                ),
+            },
+        )
+
+    # --------------------------------------------------
+    # REWRITE / MODIFY
+    # --------------------------------------------------
+
+        rewrite_patterns = (
+        r"\bmake\b",
+        r"\bchange\b",
+        r"\bremove\b",
+        r"\badd\b",
+        r"\binclude\b",
+        r"\bshorten\b",
+        r"\bexpand\b",
+        r"\brewrite\b",
+        r"\bmodify\b",
+        r"\bimprove\b",
+        r"\bfix\b",
+        r"\bturn\b",
+        r"\bconvert\b",
+        r"\bmake it\b",
+        r"\bmake this\b",
+    )
+
+        if any(
+        re.search(pattern, lowered)
+        for pattern in rewrite_patterns
+    ):
+            return (
+            "rewrite_reply",
+            {
+                "draft_id": draft_id,
+                "instruction": text,
+            },
+        )
+
+        return None, {}
 
     # ======================================================
     # PLAN
@@ -679,6 +845,48 @@ reasoning must always be present.
             "Planner context: %s",
             context,
         )
+        generate_action, generate_action_arguments = (
+    self._detect_generate_reply_action(
+        question=question,
+        email_reference=email_reference,
+        context=context,
+        explicit_ids=explicit_ids,
+    )
+)
+
+        logger.debug(
+    "Detected generate reply action: %s %s",
+    generate_action,
+    generate_action_arguments,
+)
+        # ==================================================
+# CONVERSATIONAL DRAFT ACTION DETECTION
+# ==================================================
+
+        draft_action, draft_action_arguments = (
+    self._detect_draft_action(
+        question=question,
+        context=context,
+    )
+)
+
+# Generate-reply is special because there is no draft_id
+# before the first draft is created.
+        if generate_action:
+            draft_action = generate_action
+            draft_action_arguments = generate_action_arguments
+
+        logger.debug(
+    "Detected draft action: %s %s",
+    draft_action,
+    draft_action_arguments,
+)
+
+        logger.debug(
+    "Detected draft action: %s %s",
+    draft_action,
+    draft_action_arguments,
+)
 
         logger.debug(
             "Explicit IDs: %s",
@@ -775,6 +983,24 @@ reasoning must always be present.
         # ==================================================
         # 4. BASIC NORMALIZATION
         # ==================================================
+        # ==================================================
+# 3.5. DETERMINISTIC DRAFT ACTION OVERRIDE
+# ==================================================
+
+        if draft_action:
+            plan.needs_tool = True
+            plan.tool_name = draft_action
+            plan.tool_arguments = dict(
+        draft_action_arguments
+    )
+
+            plan.needs_clarification = False
+            plan.clarification_message = None
+
+            logger.debug(
+        "Using deterministic draft action plan: %s",
+        plan.model_dump(),
+    )
 
     
         # ==================================================

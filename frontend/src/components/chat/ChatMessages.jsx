@@ -54,6 +54,30 @@ export default function ChatMessages({
   ]);
 
 
+  // ------------------------------------------------------------
+  // Show only ONE DraftCard — the latest draft action
+  // ------------------------------------------------------------
+
+  const latestDraftActionIndex =
+    messages.reduce(
+      (latestIndex, message, index) => {
+        return message?.action?.type === "draft"
+          ? index
+          : latestIndex;
+      },
+      -1
+    );
+
+
+  console.log("CHAT MESSAGES DRAFT CHECK:", {
+    messages,
+    latestDraftActionIndex,
+    lastMessage: messages[messages.length - 1],
+    lastMessageAction: messages[messages.length - 1]?.action,
+    draft,
+  });
+
+
   return (
     <div className="min-h-0 flex-1 overflow-y-auto bg-black text-white">
 
@@ -94,16 +118,20 @@ export default function ChatMessages({
                   index
                 }
 
+                /*
+                 * For draft messages, use the draft stored
+                 * inside message.action.draft.
+                 *
+                 * The global draft is only a fallback.
+                 */
                 draft={
-                  draft
+                  message?.action?.type === "draft"
+                    ? message.action.draft
+                    : draft
                 }
 
-                onEditDraft={
-                  editDraft
-                }
-
-                onRegenerateDraft={
-                  regenerateDraft
+                showDraftAction={
+                  index === latestDraftActionIndex
                 }
 
                 onApproveDraft={
@@ -112,10 +140,6 @@ export default function ChatMessages({
 
                 onRejectDraft={
                   rejectDraft
-                }
-
-                onSaveToGmail={
-                  saveDraftToGmail
                 }
 
                 onSendDraft={

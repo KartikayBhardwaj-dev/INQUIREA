@@ -2,79 +2,31 @@
 
 import DraftCard from "./DraftCard";
 
-
 export default function ChatActionRenderer({
   action,
   draft,
-
-  onEdit,
-  onRegenerate,
   onApprove,
   onReject,
-  onSaveToGmail,
   onSend,
-
   isLoading,
   loadingAction,
   getLoadingLabel,
 }) {
+  if (!action) return null;
 
-  if (!action) {
-    return null;
-  }
-
-
-  // ============================================================
-  // Draft action
-  // ============================================================
-
-  if (
-    action.type === "draft"
-  ) {
-
+  if (action.type === "draft") {
     return (
       <DraftCard
-  draft={action.draft ?? draft}
-
-        onEdit={
-          onEdit
-        }
-
-        onRegenerate={
-          onRegenerate
-        }
-
-        onApprove={
-          onApprove
-        }
-
-        onReject={
-          onReject
-        }
-
-        onSaveToGmail={
-          onSaveToGmail
-        }
-
-        onSend={
-          onSend
-        }
-
-        isLoading={
-          isLoading
-        }
-
-        loadingAction={
-          loadingAction
-        }
-
-        getLoadingLabel={
-          getLoadingLabel
-        }
+        draft={draft}
+        onApprove={onApprove}
+        onReject={onReject}
+        onSend={onSend}
+        isLoading={isLoading}
+        loadingAction={loadingAction}
+        getLoadingLabel={getLoadingLabel}
       />
     );
   }
-
 
   return null;
 }

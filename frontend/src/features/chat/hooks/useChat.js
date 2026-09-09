@@ -235,14 +235,6 @@ function normalizeAssistantMessage(
   const tool =
     getTool(data);
 
-  /*
-   * Draft-related actions may internally search/retrieve
-   * emails in order to resolve the target email.
-   *
-   * Those emails must NOT be rendered as EmailCards.
-   *
-   * The actual email is still resolved on the backend.
-   */
   const retrievedEmails = isDraftAction(tool)
     ? []
     : getRetrievedEmails(data)
@@ -252,7 +244,22 @@ function normalizeAssistantMessage(
             email?.id != null
         );
 
-  return {
+  // ============================================================
+  // Normalize the draft/tool action ONCE.
+  // ============================================================
+
+  const action =
+    normalizeToolAction(
+      data,
+      currentDraft
+    );
+
+  console.log(
+    "FINAL NORMALIZED ACTION:",
+    action
+  );
+
+  const assistantMessage = {
     id:
       crypto.randomUUID(),
 
@@ -270,11 +277,7 @@ function normalizeAssistantMessage(
     toolResult:
       getToolResult(data),
 
-    action:
-      normalizeToolAction(
-        data,
-        currentDraft
-      ),
+    action,
 
     error:
       data?.error ??
@@ -288,8 +291,9 @@ function normalizeAssistantMessage(
     timestamp:
       new Date().toISOString(),
   };
-}
 
+  return assistantMessage;
+}
 
 // ============================================================
 // Conversation normalization
@@ -950,6 +954,10 @@ export default function useChat() {
               data,
               nextDraft
             );
+            console.log(
+  "ASSISTANT MESSAGE:",
+  assistantMessage
+);
 
 
           setMessages(

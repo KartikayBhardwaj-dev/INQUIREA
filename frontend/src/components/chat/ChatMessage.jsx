@@ -15,21 +15,41 @@ export default function ChatMessage({
 
   draft,
 
-  onEditDraft,
-  onRegenerateDraft,
+  // ------------------------------------------------------------
+  // Draft actions
+  // ------------------------------------------------------------
+
   onApproveDraft,
   onRejectDraft,
-  onSaveToGmail,
   onSendDraft,
+
+  // ------------------------------------------------------------
+  // Loading
+  // ------------------------------------------------------------
 
   isDraftLoading,
   loadingAction,
   getLoadingLabel,
 
+  // ------------------------------------------------------------
+  // Email actions
+  // ------------------------------------------------------------
+
   onOpenEmail,
   onReplyEmail,
+
+  // ------------------------------------------------------------
+  // Generic message actions
+  // ------------------------------------------------------------
+
   onRegenerate,
   messageIndex,
+
+  // ------------------------------------------------------------
+  // Draft rendering control
+  // ------------------------------------------------------------
+
+  showDraftAction = false,
 }) {
 
   const isUser =
@@ -44,6 +64,26 @@ export default function ChatMessage({
 
   const isRegenerating =
     loadingAction === "regenerate";
+
+
+  const isDraftAction =
+    message.action?.type === "draft";
+
+
+  /*
+   * The actual draft is stored directly inside
+   * message.action.draft for draft actions.
+   *
+   * Prefer that over the global draft prop.
+   */
+  const actionDraft =
+    message.action?.type === "draft"
+      ? message.action.draft
+      : null;
+
+
+  const renderedDraft =
+    actionDraft ?? draft;
 
 
   async function handleCopy() {
@@ -76,7 +116,9 @@ export default function ChatMessage({
       <div className="flex justify-end px-4 py-2 sm:px-8">
 
         <div className="max-w-[min(720px,85%)] rounded-2xl rounded-br-md bg-white px-4 py-3 text-sm leading-6 text-black shadow-lg">
+
           {message.content}
+
         </div>
 
       </div>
@@ -95,18 +137,25 @@ export default function ChatMessage({
 
         <div className="flex items-start gap-3">
 
-          {/* AI ICON */}
+          {/* ====================================================
+              AI ICON
+          ==================================================== */}
 
           <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-xs font-bold text-black shadow-sm">
+
             ✦
+
           </div>
 
 
           <div className="min-w-0 flex-1">
 
-            {/* TEXT */}
+            {/* ==================================================
+                TEXT
+            ================================================== */}
 
             {message.content && (
+
               <div className="text-sm leading-7 text-white/80">
 
                 <MarkdownRenderer>
@@ -114,68 +163,78 @@ export default function ChatMessage({
                 </MarkdownRenderer>
 
               </div>
+
             )}
 
 
-            {/* DRAFT ACTION */}
+            {/* ==================================================
+                DRAFT ACTION
+            ================================================== */}
 
-            {message.action && (
-              <ChatActionRenderer
-                action={
-                  message.action
-                }
-
-                draft={
-                  draft
-                }
-
-                onEdit={
-                  onEditDraft
-                }
-
-                onRegenerate={
-                  onRegenerateDraft
-                }
-
-                onSaveToGmail={
-                  onSaveToGmail
-                }
-
-                onApprove={
-                  onApproveDraft
-                }
-
-                onReject={
-                  onRejectDraft
-                }
-
-                onSend={
-                  onSendDraft
-                }
-
-                isLoading={
-                  isDraftLoading
-                }
-
-                loadingAction={
-                  loadingAction
-                }
-
-                getLoadingLabel={
-                  getLoadingLabel
-                }
-              />
-            )}
+            {console.log("RENDER DRAFT CHECK:", {
+              isDraftAction,
+              showDraftAction,
+              action: message.action,
+              draft: renderedDraft,
+            })}
 
 
-            {/* RETRIEVED EMAILS */}
+            {isDraftAction &&
+              showDraftAction && (
+
+                <ChatActionRenderer
+                  action={
+                    message.action
+                  }
+
+                  /*
+                   * IMPORTANT:
+                   * Pass the actual draft from the action.
+                   */
+                  draft={
+                    renderedDraft
+                  }
+
+                  onApprove={
+                    onApproveDraft
+                  }
+
+                  onReject={
+                    onRejectDraft
+                  }
+
+                  onSend={
+                    onSendDraft
+                  }
+
+                  isLoading={
+                    isDraftLoading
+                  }
+
+                  loadingAction={
+                    loadingAction
+                  }
+
+                  getLoadingLabel={
+                    getLoadingLabel
+                  }
+                />
+
+              )}
+
+
+            {/* ==================================================
+                RETRIEVED EMAILS
+            ================================================== */}
 
             {message.retrievedEmails?.length > 0 && (
 
               <div className="mt-5 space-y-3">
 
                 <p className="text-[10px] font-semibold uppercase tracking-[0.15em] text-white/35">
+
                   Relevant emails
+
                 </p>
 
 
@@ -200,51 +259,80 @@ export default function ChatMessage({
                       onReply={
                         onReplyEmail
                       }
+
                     />
 
                   )
                 )}
 
               </div>
+
             )}
 
 
-            {/* MESSAGE ACTIONS */}
+            {/* ==================================================
+                MESSAGE ACTIONS
+            ================================================== */}
 
             <div className="mt-3 flex items-center gap-1">
 
+              {/* ==================================================
+                  COPY
+              ================================================== */}
+
               <button
                 type="button"
+
                 onClick={
                   handleCopy
                 }
+
                 disabled={
                   isDraftLoading
                 }
+
                 className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
               >
+
                 {copied
                   ? "Copied"
                   : "Copy"}
+
               </button>
 
 
-              <button
-                type="button"
-                disabled={
-                  isDraftLoading
-                }
-                onClick={() =>
-                  onRegenerate?.(
-                    messageIndex
-                  )
-                }
-                className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
-              >
-                {isRegenerating
-                  ? "Generating..."
-                  : "Regenerate"}
-              </button>
+              {/* ==================================================
+                  GENERIC REGENERATE
+                  
+                  Draft messages do NOT show this button.
+                  Draft modification happens through chat.
+              ================================================== */}
+
+              {!isDraftAction && (
+
+                <button
+                  type="button"
+
+                  disabled={
+                    isDraftLoading
+                  }
+
+                  onClick={() =>
+                    onRegenerate?.(
+                      messageIndex
+                    )
+                  }
+
+                  className="rounded-lg px-2 py-1 text-[10px] text-white/35 transition hover:bg-white/10 hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-30"
+                >
+
+                  {isRegenerating
+                    ? "Generating..."
+                    : "Regenerate"}
+
+                </button>
+
+              )}
 
             </div>
 
