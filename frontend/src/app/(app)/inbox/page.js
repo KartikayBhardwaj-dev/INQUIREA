@@ -82,20 +82,24 @@ export default function InboxPage() {
    */
 
   const {
-    messages,
-    conversations,
-    activeConversationId,
+  messages,
+  conversations,
+  activeConversationId,
 
-    isLoading: isChatLoading,
-    isLoadingConversations,
+  isLoading: isChatLoading,
+  isLoadingConversations,
 
-    error: chatError,
+  error: chatError,
 
-    sendMessage,
-    loadConversation,
-    newConversation,
-    regenerate,
-  } = useChat();
+  sendMessage,
+  loadConversation,
+  newConversation,
+  regenerate,
+
+  approveDraft,
+  rejectDraft,
+  sendDraft,
+} = useChat();
 
 
   /*
@@ -332,23 +336,39 @@ export default function InboxPage() {
           {/* Messages */}
 
           <ChatMessages
-            messages={messages}
-            isLoading={
-              isChatLoading
-            }
-            onSuggestion={
-              sendMessage
-            }
-            onOpenEmail={
-              setSelectedEmail
-            }
-            onReplyEmail={
-              handleReply
-            }
-            onRegenerate={
-              regenerate
-            }
-          />
+  messages={messages}
+  isLoading={
+    isChatLoading
+  }
+
+  onSuggestion={
+    sendMessage
+  }
+
+  onOpenEmail={
+    setSelectedEmail
+  }
+
+  onReplyEmail={
+    handleReply
+  }
+
+  onRegenerate={
+    regenerate
+  }
+
+  approveDraft={
+    approveDraft
+  }
+
+  rejectDraft={
+    rejectDraft
+  }
+
+  sendDraft={
+    sendDraft
+  }
+/>
 
 
           {/* Input */}

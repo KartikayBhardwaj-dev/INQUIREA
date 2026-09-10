@@ -1084,30 +1084,45 @@ export default function useChat() {
   // ==========================================================
 
   const approveDraft =
-    useCallback(
-      async () => {
+  useCallback(
+    async (draftId = null) => {
 
-        if (!draft?.draft_id) {
+      const targetDraftId =
+        draftId ??
+        draft?.draft_id;
 
-          setError(
-            "No active draft is available."
-          );
 
-          return null;
+      console.log(
+        "APPROVE DRAFT CLICK:",
+        {
+          cardDraftId: draftId,
+          activeDraftId: draft?.draft_id,
+          targetDraftId,
         }
+      );
 
 
-        return sendMessage(
-          `Approve draft ${draft.draft_id}`,
-          "approveDraft"
+      if (!targetDraftId) {
+
+        setError(
+          "No active draft is available."
         );
 
-      },
-      [
-        draft?.draft_id,
-        sendMessage,
-      ]
-    );
+        return null;
+      }
+
+
+      return sendMessage(
+        `Approve draft ${targetDraftId}`,
+        "approveDraft"
+      );
+
+    },
+    [
+      draft?.draft_id,
+      sendMessage,
+    ]
+  );
 
 
   // ==========================================================

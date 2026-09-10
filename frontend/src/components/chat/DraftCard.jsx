@@ -223,15 +223,27 @@ export default function DraftCard({
           {isPending && (
 
             <button
-              type="button"
-              disabled={isLoading}
-              onClick={() => onApprove?.()}
-              className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {loadingAction === "approveDraft"
-                ? loadingLabel || "Approving..."
-                : "Approve"}
-            </button>
+  type="button"
+  disabled={isLoading}
+  onClick={() => {
+    console.log(
+      "APPROVE BUTTON CLICK:",
+      {
+        draftId: draft?.draft_id,
+        draft,
+      }
+    );
+
+    onApprove?.(
+      draft?.draft_id
+    );
+  }}
+  className="rounded-lg bg-white px-3 py-2 text-xs font-medium text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-40"
+>
+  {loadingAction === "approveDraft"
+    ? loadingLabel || "Approving..."
+    : "Approve"}
+</button>
 
           )}
 
