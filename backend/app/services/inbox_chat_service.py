@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime
+from decimal import Decimal
 import logging
 import uuid
 from typing import Any
@@ -12,6 +14,32 @@ from backend.app.models.chat_history import ChatHistory
 from backend.app.schemas.chat import ChatResponse
 
 logger = logging.getLogger(__name__)
+
+
+def _make_json_serializable(obj: Any) -> Any:
+    """
+    Recursively convert datetimes, UUIDs, Decimals, Pydantic models, 
+    and other non-serializable objects into JSON-friendly primitives.
+    """
+    if isinstance(obj, dict):
+        return {str(k): _make_json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, (list, tuple, set)):
+        return [_make_json_serializable(v) for v in obj]
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, uuid.UUID):
+        return str(obj)
+    elif isinstance(obj, Decimal):
+        return float(obj)
+    elif hasattr(obj, "model_dump") and callable(obj.model_dump):  # Pydantic v2
+        return _make_json_serializable(obj.model_dump())
+    elif hasattr(obj, "dict") and callable(obj.dict):  # Pydantic v1
+        return _make_json_serializable(obj.dict())
+    elif isinstance(obj, (str, int, float, bool, type(None))):
+        return obj
+    else:
+        # Ultimate fallback to string representation to guarantee no crash
+        return str(obj)
 
 
 class InboxChatService:
@@ -161,56 +189,45 @@ class InboxChatService:
         action_metadata = result.get("context_metadata") or {}
 
         if not isinstance(action_metadata, dict):
-
             action_metadata = {}
 
-# Always preserve tool
-
+        # Always preserve tool
         tool_name = result.get("tool")
-
         if tool_name:
-
             action_metadata["tool"] = tool_name
-
             action_metadata["action"] = tool_name
 
-# Preserve complete tool result
-
+        # Preserve complete tool result
         tool_result = result.get("tool_result")
-
         if isinstance(tool_result, dict):
-
             action_metadata["tool_result"] = tool_result
 
             if tool_result.get("draft_id") is not None:
-
                 action_metadata["draft_id"] = tool_result["draft_id"]
 
             if tool_result.get("email_id") is not None:
-
                 action_metadata["email_id"] = tool_result["email_id"]
 
             if tool_result.get("approval_status") is not None:
+                action_metadata["approval_status"] = tool_result["approval_status"]
 
-                action_metadata["approval_status"] = (
-
-            tool_result["approval_status"]
-
-        )
-
-# Preserve query plan for debugging / audit
-
+        # Preserve query plan for debugging / audit
         query_plan = result.get("query_plan")
-
         if isinstance(query_plan, dict):
-
             action_metadata["query_plan"] = query_plan
+
+        # Preserve retrieved emails for history rendering
+        retrieved_emails = result.get("retrieved_emails")
+        if retrieved_emails:
+            action_metadata["retrieved_emails"] = retrieved_emails
 
         # --------------------------------------------------
         # Persist conversation turn
         # --------------------------------------------------
 
         try:
+            # Ensure all metadata values (including nested datetimes) are JSON serializable
+            safe_action_metadata = _make_json_serializable(action_metadata)
 
             self._save_message(
                 conversation_id=conversation_id,
@@ -225,7 +242,7 @@ class InboxChatService:
                 user_id=user_id,
                 role="assistant",
                 message=str(result.get("answer", "")),
-                metadata=action_metadata,
+                metadata=safe_action_metadata,
             )
 
             self.db.commit()
@@ -272,12 +289,11 @@ class InboxChatService:
         self,
         conversation_id: str,
         user_id: int,
-    ) -> list[ChatHistory]:
+    ) -> list[Any]:
         """
-        Return complete chronological conversation history.
+        Return complete chronological conversation history with metadata unpacked.
         """
-
-        return (
+        rows = (
             self.db.query(ChatHistory)
             .filter(
                 ChatHistory.conversation_id == conversation_id,
@@ -286,6 +302,22 @@ class InboxChatService:
             .order_by(ChatHistory.created_at.asc())
             .all()
         )
+
+        result = []
+        for row in rows:
+            metadata = row.message_metadata or {}
+            result.append({
+                "id": row.id,
+                "role": row.role,
+                "content": row.message,
+                "created_at": row.created_at,
+                "retrieved_emails": metadata.get("retrieved_emails", []),
+                "tool": metadata.get("tool"),
+                "tool_result": metadata.get("tool_result"),
+                "query_plan": metadata.get("query_plan", {}),
+                "error": metadata.get("error"),
+            })
+        return result
 
     def list_conversations(
         self,
@@ -316,7 +348,6 @@ class InboxChatService:
         """
 
         try:
-
             (
                 self.db.query(ChatHistory)
                 .filter(

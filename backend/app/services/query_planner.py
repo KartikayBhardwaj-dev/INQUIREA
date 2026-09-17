@@ -75,464 +75,205 @@ class QueryPlanner:
     def __init__(self):
 
         self.parser = PydanticOutputParser(
-            pydantic_object=QueryPlan
-        )
+        pydantic_object=QueryPlan
+    )
 
         categories_list = ", ".join(
-            c.value for c in EmailCategory
-        )
+        c.value for c in EmailCategory
+    )
 
-        self.prompt = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    f"""
+        system_prompt = """
 You are the Retrieval Planning Engine for INQUIREA.
 
-Your ONLY responsibility is to transform the user's request
-into a structured QueryPlan.
+Your job is ONLY to convert a user's request into a
+structured QueryPlan.
 
-You NEVER answer the user.
-You NEVER summarize emails.
-You NEVER invent IDs.
+You do not answer the user.
+You do not summarize emails.
+You do not execute tools.
+You never invent IDs.
 
-Return ONLY valid JSON matching QueryPlan.
+Choose exactly one intent:
+
+- semantic_search
+- summarize
+- metadata_search
+- sender_lookup
+- deadline_search
 
 ========================================================
-AVAILABLE INTENTS
+SEARCH INTERPRETATION
 ========================================================
 
-1. semantic_search
-2. summarize
-3. metadata_search
-4. sender_lookup
-5. deadline_search
+Use semantic_search for natural-language requests about
+email content, topics, products, offers, people, events,
+or concepts.
 
-Choose exactly ONE.
-==========================
-Natural-language email references:
-- If the user refers to an email by subject, title, sender, or another natural-language identifier, preserve that reference in `email_reference`.
-- Do NOT invent an email_id.
-- Example:
-  User: Generate a reply to the email "4 new image styles to try"
-  Plan:
-    tool_name: generate_reply
-    email_reference: "4 new image styles to try"
-    email_id: null
-========================
+Examples:
+
+"Show me promotional emails"
+"Find emails about student discounts"
+"Show marketing emails about student deals"
+"Find emails mentioning internships"
+"Which emails talk about discounts?"
+
+Use metadata_search when the user explicitly asks for
+structured email metadata such as category, priority,
+reply requirement, or similar fields.
+
+Use sender_lookup when the request is primarily about
+emails from a particular sender.
+
+Use deadline_search when the request is primarily about
+deadlines, due dates, or time-sensitive tasks.
+
+Use summarize when the user explicitly asks to summarize
+one or more emails or a group of emails.
+
 ========================================================
-EXPLICIT CONVERSATIONAL CONTEXT
+SEMANTIC QUERY
 ========================================================
 
-Conversation history may contain structured metadata from
-previous assistant tool executions.
+For semantic_search, preserve the important meaning of
+the user's request in semantic_query.
 
 Example:
 
-{{{{
-    "role": "assistant",
-    "message": "Draft generated successfully.",
-    "metadata": {{{{
-        "tool": "generate_reply",
-        "action": "generate_reply",
-        "email_id": 25,
-        "draft_id": 40
-    }}}}
-}}}}
+User:
+Show me promotional or marketing emails about student deals
 
-The structured metadata is authoritative for resolving
-references to objects created or accessed by previous
-actions.
+Use:
 
-The current conversational object may be referred to as:
+semantic_query =
+"promotional or marketing emails about student deals"
+
+Do not replace the user's topic with a generic query.
+
+========================================================
+EMAIL REFERENCES
+========================================================
+
+If the user refers to an email by a natural-language
+subject or title, preserve it in email_reference.
+
+Never invent an email_id.
+
+========================================================
+CONVERSATIONAL CONTEXT
+========================================================
+
+Conversation history may contain small structured
+metadata from previous actions.
+
+Relevant fields include:
+
+- email_id
+- draft_id
+- tool
+- action
+
+When an existing email or draft is referenced as:
 
 - it
-- this
-- this draft
-- that draft
-- the draft
-- the reply
-- this reply
-- that reply
 - this email
 - that email
-- the email
+- this draft
+- that draft
 
-For these references:
+use the most recent relevant structured ID.
 
-1. Prefer an explicit ID from the CURRENT user message.
-2. Otherwise use the MOST RECENT RELEVANT structured
-   metadata from conversation history.
-3. Never invent an ID.
-4. If the required ID cannot be resolved, request
-   clarification.
-
-========================================================
-DRAFT CONTEXT
-========================================================
-
-A draft context consists primarily of:
-
-- draft_id
-- email_id
-- tool/action
-
-When the user says:
-
-"make it shorter"
-"make the draft shorter"
-"make this reply professional"
-"add my phone number"
-"change the ending"
-"regenerate it"
-"approve it"
-"reject it"
-"send it"
-
-and the most recent relevant context contains:
-
-{{{{
-    "draft_id": 40,
-    "email_id": 25
-}}}}
-
-use:
-
-"draft_id": 40
-
-Do NOT use the email_id as the draft_id.
-
-Example:
-
-Previous assistant result:
-
-{{{{
-    "tool": "generate_reply",
-    "draft_id": 40,
-    "email_id": 25
-}}}}
-
-User:
-
-"Make it shorter"
-
-Correct plan:
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "rewrite_reply",
-    "tool_arguments": {{{{
-        "draft_id": 40,
-        "instruction": "make it shorter"
-    }}}}
-}}}}
-
-========================================================
-EMAIL CONTEXT
-========================================================
-
-When the user refers to:
-
-"this email"
-"that email"
-"the email"
-"it"
-
-in a request requiring an email_id, use the most recent
-relevant email_id from structured conversation metadata.
-
-Example:
-
-Previous assistant result:
-
-{{{{
-    "tool": "get_email",
-    "email_id": 25
-}}}}
-
-User:
-
-"Generate a reply to it"
-
-Correct plan:
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "generate_reply",
-    "tool_arguments": {{{{
-        "email_id": 25,
-        "tone": "professional"
-    }}}}
-}}}}
-
-========================================================
-CONTEXT PRIORITY
-========================================================
-
-When resolving IDs, use this priority:
-
-1. Explicit ID in current user message
-2. Most recent relevant structured tool result
-3. Older structured metadata
-4. Clarification
+An explicit ID in the current user message always
+overrides previous context.
 
 Never invent IDs.
 
 ========================================================
-LEVEL 2 TOOLS
+RETRIEVAL SETTINGS
 ========================================================
 
-Available tools:
+Default retrieve_limit = 5.
 
-- search_emails
-- get_email
-- generate_reply
-- rewrite_reply
-- edit_draft
-- approve_draft
-- reject_draft
-- send_reply
-Use a tool when the user wants an ACTION.
+Use up to 50 when necessary.
 
-========================================================
-GENERATE REPLY
-========================================================
+Use sort_by = relevance by default.
 
-"Generate a reply to email 10"
+Use sort_by = date for requests such as:
 
-{{{{
-    "needs_tool": true,
-    "tool_name": "generate_reply",
-    "tool_arguments": {{{{
-        "email_id": 10,
-        "tone": "professional"
-    }}}}
-}}}}
-Generate reply requires either:
-- email_id, OR
-- email_reference.
+- latest
+- newest
+- recent
+- most recent
 
-If an email_reference is available, do not ask the user for an email_id. The backend will resolve the reference.
-========================================================
-REWRITE REPLY
-========================================================
+Use sort_by = priority when the user explicitly asks
+for highest-priority emails.
 
-rewrite_reply requires:
+For summarize, retrieve_limit should normally be 20.
 
-- draft_id
-- instruction
-
-The instruction is NOT the same thing as tone.
-
-Examples:
-
-"Make it shorter"
-
-{{{{
-    "draft_id": 15,
-    "instruction": "make it shorter"
-}}}}
-
-"Make it more professional"
-
-{{{{
-    "draft_id": 15,
-    "instruction": "make it more professional"
-}}}}
-
-"Change the ending"
-
-{{{{
-    "draft_id": 15,
-    "instruction": "change the ending"
-}}}}
-
-"Remove unnecessary details"
-
-{{{{
-    "draft_id": 15,
-    "instruction": "remove unnecessary details"
-}}}}
+For sender_lookup and deadline_search, retrieve_limit
+should normally be 10.
 
 ========================================================
-EDIT DRAFT
-========================================================
-
-Only use edit_draft when the user explicitly supplies
-replacement content.
-
-It requires:
-
-- draft_id
-- content
-
-========================================================
-APPROVE
-========================================================
-
-"Approve draft 15"
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "approve_draft",
-    "tool_arguments": {{{{
-        "draft_id": 15
-    }}}}
-}}}}
-
-"Approve it"
-
-Use the most recent relevant draft_id.
-
-========================================================
-REJECT
-========================================================
-
-"Reject draft 15"
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "reject_draft",
-    "tool_arguments": {{{{
-        "draft_id": 15
-    }}}}
-}}}}
-
-"Reject it"
-
-Use the most recent relevant draft_id.
-
-
-========================================================
-SEND
-========================================================
-
-"Send draft 15"
-
-{{{{
-    "needs_tool": true,
-    "tool_name": "send_reply",
-    "tool_arguments": {{{{
-        "draft_id": 15
-    }}}}
-}}}}
-
-"Send it"
-
-Use the most recent relevant draft_id.
-
-========================================================
-ID RULE
-========================================================
-
-Current user message has highest priority.
-
-For example:
-
-Previous context:
-draft_id = 40
-
-User:
-"Send draft 55"
-
-Use:
-
-draft_id = 55
-
-Never let old context override an explicit current ID.
-
-If no ID can be resolved for an action that requires one:
-
-needs_clarification = true
-
-Do not invent an ID.
-
-========================================================
-GENERATE REPLY TONE
-========================================================
-
-generate_reply defaults to:
-
-"professional"
-
-========================================================
-REWRITE INSTRUCTION
-========================================================
-
-rewrite_reply MUST contain:
-
-"instruction"
-
-Do not reduce instructions to a tone.
-
-Examples:
-
-"make it shorter"
-"make it professional"
-"make it friendlier"
-"change the ending"
-"remove unnecessary details"
-"make it concise"
-
-========================================================
-CATEGORY
+FILTERS
 ========================================================
 
 Valid categories:
 
-{categories_list}
+__CATEGORIES_LIST__
 
-========================================================
-RETRIEVAL
-========================================================
+Use category only when the request clearly specifies
+a known email category.
 
-Default limit = 5.
+Valid priorities:
 
-Summarize = 20.
+- low
+- medium
+- high
+- urgent
 
-Sender/deadline = 10.
+Use priority only when explicitly requested.
 
-Maximum = 50.
+Use requires_reply only when the user explicitly asks
+about emails that require or do not require a reply.
 
-Default sort = relevance.
+Use sender only when a sender is explicitly identified.
 
-Latest/recent = date.
+Use date_from and date_to only for explicit date filters.
 
-Highest priority = priority.
-
-========================================================
-DATE RULE
-========================================================
-
-Only use date_from/date_to for explicit date filters.
-
-Keep contextual dates inside semantic_query.
+Keep natural-language date context in semantic_query.
 
 ========================================================
 OUTPUT
 ========================================================
 
-Return ONLY valid JSON.
+Return ONLY valid JSON matching QueryPlan.
 
-Do not create fields outside QueryPlan.
-
-tool_arguments must always be an object.
+tool_arguments must be an object.
 
 reasoning must always be present.
 
-{{format_instructions}}
-""",
-                ),
-                (
-                    "user",
-                    "Conversation History:\n"
-                    "{conversation_history}\n\n"
-                    "Current Question:\n"
-                    "{question}",
-                ),
-            ]
-        )
+{format_instructions}
+"""
 
+        system_prompt = system_prompt.replace(
+        "__CATEGORIES_LIST__",
+        categories_list,
+    )
+
+        self.prompt = ChatPromptTemplate.from_messages(
+        [
+            (
+                "system",
+                system_prompt,
+            ),
+            (
+                "user",
+                "Conversation History:\n"
+                "{conversation_history}\n\n"
+                "Current Question:\n"
+                "{question}",
+            ),
+        ]
+    )
 
     # ======================================================
     # STRUCTURED CONTEXT EXTRACTION
@@ -540,127 +281,153 @@ reasoning must always be present.
 
     @staticmethod
     def _get_context_ids(
-    conversation: list[dict[str, Any]],
-) -> dict[str, Any]:
-    
-        """
-    Extract the most recent draft and email context independently.
+        conversation: list[dict[str, Any]],
+    ) -> dict[str, Any]:
 
-    Draft context and email context are intentionally tracked
-    separately because a later email-related action should not
-    accidentally replace the current draft reference.
-    """
+        """
+        Extract the most recent draft and email context
+        independently.
+
+        Draft context and email context are intentionally
+        tracked separately because a later email-related
+        action should not accidentally replace the current
+        draft reference.
+        """
 
         context: dict[str, Any] = {
-        "tool": None,
-        "draft_id": None,
-        "email_id": None,
-    }
+            "tool": None,
+            "draft_id": None,
+            "email_id": None,
+        }
 
         for message in reversed(conversation):
+
             metadata = message.get("metadata")
 
             if not isinstance(metadata, dict):
                 continue
 
             if context["draft_id"] is None:
+
                 draft_id = metadata.get("draft_id")
 
                 if draft_id is not None:
                     context["draft_id"] = draft_id
 
             if context["email_id"] is None:
+
                 email_id = metadata.get("email_id")
 
                 if email_id is not None:
                     context["email_id"] = email_id
 
             if context["tool"] is None:
+
                 tool = (
-                metadata.get("tool")
-                or metadata.get("action")
-            )
+                    metadata.get("tool")
+                    or metadata.get("action")
+                )
 
                 if tool is not None:
                     context["tool"] = tool
 
             if (
-            context["draft_id"] is not None
-            and context["email_id"] is not None
-            and context["tool"] is not None
-        ):
+                context["draft_id"] is not None
+                and context["email_id"] is not None
+                and context["tool"] is not None
+            ):
                 break
 
         return context
-    def _extract_email_reference(self, question: str) -> str | None:
+
+    def _extract_email_reference(
+        self,
+        question: str,
+    ) -> str | None:
+
         match = re.search(
-        r'\bemail\b(?:\s+(?:titled|called|named))?\s*["\']([^"\']+)["\']',
-        question,
-        re.IGNORECASE,
-    )
+            r'\bemail\b'
+            r'(?:\s+(?:titled|called|named))?'
+            r'\s*["\']([^"\']+)["\']',
+            question,
+            re.IGNORECASE,
+        )
 
         if match:
             return match.group(1).strip()
 
         return None
-    def _detect_generate_reply_action(
-    self,
-    question: str,
-    email_reference: str | None,
-    context: dict[str, Any],
-    explicit_ids: dict[str, int],
-) -> tuple[str | None, dict[str, Any]]:
-        
-        """
-    Deterministically detect requests to generate a reply.
 
-    Supports:
-    - Generate a reply to email 10
-    - Generate a reply to the email "4 new image styles to try"
-    - Write a reply to this email
-    - Draft a response to this email
-    """
+    def _detect_generate_reply_action(
+        self,
+        question: str,
+        email_reference: str | None,
+        context: dict[str, Any],
+        explicit_ids: dict[str, int],
+    ) -> tuple[str | None, dict[str, Any]]:
+
+        """
+        Deterministically detect requests to generate a reply.
+
+        Supports:
+
+        - Generate a reply to email 10
+        - Generate a reply to the email "4 new image styles to try"
+        - Write a reply to this email
+        - Draft a response to this email
+        """
 
         lowered = question.strip().lower()
 
         generate_patterns = (
-        r"\bgenerate\b.*\breply\b",
-        r"\bwrite\b.*\breply\b",
-        r"\bdraft\b.*\breply\b",
-        r"\bcreate\b.*\breply\b",
-        r"\bcompose\b.*\breply\b",
-        r"\bwrite\b.*\bresponse\b",
-        r"\bdraft\b.*\bresponse\b",
-        r"\bcreate\b.*\bresponse\b",
-        r"\bcompose\b.*\bresponse\b",
-    )
+            r"\bgenerate\b.*\breply\b",
+            r"\bwrite\b.*\breply\b",
+            r"\bdraft\b.*\breply\b",
+            r"\bcreate\b.*\breply\b",
+            r"\bcompose\b.*\breply\b",
+            r"\bwrite\b.*\bresponse\b",
+            r"\bdraft\b.*\bresponse\b",
+            r"\bcreate\b.*\bresponse\b",
+            r"\bcompose\b.*\bresponse\b",
+        )
 
         if not any(
-        re.search(pattern, lowered)
-        for pattern in generate_patterns
-    ):
+            re.search(pattern, lowered)
+            for pattern in generate_patterns
+        ):
             return None, {}
 
         arguments: dict[str, Any] = {}
 
-    # Explicit email ID has highest priority.
+        # Explicit email ID has highest priority.
         if explicit_ids.get("email_id") is not None:
-            arguments["email_id"] = explicit_ids["email_id"]
 
-    # Natural-language subject/reference.
+            arguments["email_id"] = (
+                explicit_ids["email_id"]
+            )
+
+        # Natural-language subject/reference.
         elif email_reference:
-            arguments["email_reference"] = email_reference
 
-    # Otherwise use the most recent email context.
+            arguments["email_reference"] = (
+                email_reference
+            )
+
+        # Otherwise use the most recent email context.
         elif context.get("email_id") is not None:
-            arguments["email_id"] = context["email_id"]
+
+            arguments["email_id"] = (
+                context["email_id"]
+            )
 
         else:
+
             return None, {}
 
         arguments["tone"] = "professional"
 
         return "generate_reply", arguments
+
     # ======================================================
     # EXPLICIT ID EXTRACTION
     # ======================================================
@@ -685,28 +452,36 @@ reasoning must always be present.
         )
 
         if draft_match:
+
             ids["draft_id"] = int(
                 draft_match.group(1)
             )
 
         if email_match:
+
             ids["email_id"] = int(
                 email_match.group(1)
             )
 
         return ids
+
+    # ======================================================
+    # DRAFT ACTION DETECTION
+    # ======================================================
+
     @staticmethod
     def _detect_draft_action(
-    question: str,
-    context: dict[str, Any],
-) -> tuple[str | None, dict[str, Any]]:
-        
-        """
-    Deterministically detect common conversational actions
-    against the current draft.
+        question: str,
+        context: dict[str, Any],
+    ) -> tuple[str | None, dict[str, Any]]:
 
-    This protects the draft workflow from LLM planning ambiguity.
-    """
+        """
+        Deterministically detect common conversational
+        actions against the current draft.
+
+        This protects the draft workflow from LLM planning
+        ambiguity.
+        """
 
         draft_id = context.get("draft_id")
 
@@ -716,103 +491,109 @@ reasoning must always be present.
         text = question.strip()
         lowered = text.lower()
 
-    # --------------------------------------------------
-    # APPROVE
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # APPROVE
+        # --------------------------------------------------
 
         if re.search(
-        r"\b(approve|approved)\b",
-        lowered,
-    ):
-            return (
-            "approve_draft",
-            {
-                "draft_id": draft_id,
-            },
-        )
+            r"\b(approve|approved)\b",
+            lowered,
+        ):
 
-    # --------------------------------------------------
-    # REJECT
-    # --------------------------------------------------
+            return (
+                "approve_draft",
+                {
+                    "draft_id": draft_id,
+                },
+            )
+
+        # --------------------------------------------------
+        # REJECT
+        # --------------------------------------------------
 
         if re.search(
-        r"\b(reject|rejected|discard)\b",
-        lowered,
-    ):
-            return (
-            "reject_draft",
-            {
-                "draft_id": draft_id,
-            },
-        )
+            r"\b(reject|rejected|discard)\b",
+            lowered,
+        ):
 
-    # --------------------------------------------------
-    # SEND
-    # --------------------------------------------------
+            return (
+                "reject_draft",
+                {
+                    "draft_id": draft_id,
+                },
+            )
+
+        # --------------------------------------------------
+        # SEND
+        # --------------------------------------------------
 
         if re.search(
-        r"\b(send|send it|send this)\b",
-        lowered,
-    ):
-            return (
-            "send_reply",
-            {
-                "draft_id": draft_id,
-            },
-        )
+            r"\b(send|send it|send this)\b",
+            lowered,
+        ):
 
-    # --------------------------------------------------
-    # REGENERATE
-    # --------------------------------------------------
+            return (
+                "send_reply",
+                {
+                    "draft_id": draft_id,
+                },
+            )
+
+        # --------------------------------------------------
+        # REGENERATE
+        # --------------------------------------------------
 
         if re.search(
-        r"\b(regenerate|generate again|try again)\b",
-        lowered,
-    ):
-            return (
-            "rewrite_reply",
-            {
-                "draft_id": draft_id,
-                "instruction": (
-                    "Regenerate the draft while preserving "
-                    "the original intent and important information."
-                ),
-            },
-        )
+            r"\b(regenerate|generate again|try again)\b",
+            lowered,
+        ):
 
-    # --------------------------------------------------
-    # REWRITE / MODIFY
-    # --------------------------------------------------
+            return (
+                "rewrite_reply",
+                {
+                    "draft_id": draft_id,
+                    "instruction": (
+                        "Regenerate the draft while preserving "
+                        "the original intent and important "
+                        "information."
+                    ),
+                },
+            )
+
+        # --------------------------------------------------
+        # REWRITE / MODIFY
+        # --------------------------------------------------
 
         rewrite_patterns = (
-        r"\bmake\b",
-        r"\bchange\b",
-        r"\bremove\b",
-        r"\badd\b",
-        r"\binclude\b",
-        r"\bshorten\b",
-        r"\bexpand\b",
-        r"\brewrite\b",
-        r"\bmodify\b",
-        r"\bimprove\b",
-        r"\bfix\b",
-        r"\bturn\b",
-        r"\bconvert\b",
-        r"\bmake it\b",
-        r"\bmake this\b",
-    )
+            r"\bmake\b",
+            r"\bchange\b",
+            r"\bremove\b",
+            r"\badd\b",
+            r"\binclude\b",
+            r"\bshorten\b",
+            r"\bexpand\b",
+            r"\brewrite\b",
+            r"\bmodify\b",
+            r"\bimprove\b",
+            r"\bfix\b",
+            r"\bturn\b",
+            r"\bconvert\b",
+            r"\bmake it\b",
+            r"\bmake this\b",
+        )
 
         if any(
-        re.search(pattern, lowered)
-        for pattern in rewrite_patterns
-    ):
+            re.search(pattern, lowered)
+            for pattern in rewrite_patterns
+        ):
+
             return (
-            "rewrite_reply",
-            {
-                "draft_id": draft_id,
-                "instruction": text,
-            },
-        )
+                "rewrite_reply",
+                {
+                    "draft_id": draft_id,
+                    "instruction": text,
+                },
+            )
 
         return None, {}
 
@@ -839,54 +620,15 @@ reasoning must always be present.
         explicit_ids = self._extract_explicit_ids(
             question
         )
-        email_reference = self._extract_email_reference(question)
+
+        email_reference = self._extract_email_reference(
+            question
+        )
 
         logger.debug(
             "Planner context: %s",
             context,
         )
-        generate_action, generate_action_arguments = (
-    self._detect_generate_reply_action(
-        question=question,
-        email_reference=email_reference,
-        context=context,
-        explicit_ids=explicit_ids,
-    )
-)
-
-        logger.debug(
-    "Detected generate reply action: %s %s",
-    generate_action,
-    generate_action_arguments,
-)
-        # ==================================================
-# CONVERSATIONAL DRAFT ACTION DETECTION
-# ==================================================
-
-        draft_action, draft_action_arguments = (
-    self._detect_draft_action(
-        question=question,
-        context=context,
-    )
-)
-
-# Generate-reply is special because there is no draft_id
-# before the first draft is created.
-        if generate_action:
-            draft_action = generate_action
-            draft_action_arguments = generate_action_arguments
-
-        logger.debug(
-    "Detected draft action: %s %s",
-    draft_action,
-    draft_action_arguments,
-)
-
-        logger.debug(
-    "Detected draft action: %s %s",
-    draft_action,
-    draft_action_arguments,
-)
 
         logger.debug(
             "Explicit IDs: %s",
@@ -894,139 +636,249 @@ reasoning must always be present.
         )
 
         # ==================================================
-        # 2. BUILD HISTORY
+        # 2. DETERMINISTIC ACTION DETECTION
         # ==================================================
 
-        history_str = (
-            "No previous conversation history."
+        generate_action, generate_action_arguments = (
+            self._detect_generate_reply_action(
+                question=question,
+                email_reference=email_reference,
+                context=context,
+                explicit_ids=explicit_ids,
+            )
         )
 
-        if conversation:
-
-            history_parts: list[str] = []
-
-            for message in conversation:
-
-                role = message.get(
-                    "role",
-                    "user",
-                )
-
-                content = message.get(
-                    "message",
-                    message.get(
-                        "content",
-                        "",
-                    ),
-                )
-
-                metadata = message.get(
-                    "metadata",
-                    {},
-                )
-
-                history_parts.append(
-                    f"{str(role).capitalize()}: "
-                    f"{content}"
-                )
-
-                if metadata:
-                    history_parts.append(
-                        "Structured metadata: "
-                        f"{metadata}"
-                    )
-
-            history_str = "\n".join(
-                history_parts
-            )
-
-        # ==================================================
-        # 3. CALL LLM
-        # ==================================================
-
-        llm_instance = get_llm()
-
-        chain = (
-            self.prompt.partial(
-                format_instructions=(
-                    self.parser.get_format_instructions()
-                )
-            )
-            | llm_instance
-            | self.parser
+        logger.debug(
+            "Detected generate reply action: %s %s",
+            generate_action,
+            generate_action_arguments,
         )
 
-        try:
+        draft_action, draft_action_arguments = (
+            self._detect_draft_action(
+                question=question,
+                context=context,
+            )
+        )
 
-            plan: QueryPlan = await chain.ainvoke(
-                {
-                    "question": question,
-                    "conversation_history": history_str,
-                }
+        # Generate-reply is special because there is no
+        # draft_id before the first draft is created.
+        if generate_action:
+
+            draft_action = generate_action
+
+            draft_action_arguments = (
+                generate_action_arguments
             )
 
-        except Exception:
+        logger.debug(
+            "Detected draft action: %s %s",
+            draft_action,
+            draft_action_arguments,
+        )
 
-            logger.exception(
-                "Failed to parse QueryPlan."
-            )
+        # ==================================================
+        # 3. DETERMINISTIC ACTION SHORT-CIRCUIT
+        # ==================================================
+        #
+        # IMPORTANT:
+        #
+        # If an action has already been identified
+        # deterministically, DO NOT call the LLM planner.
+        #
+        # This prevents:
+        #
+        #   action request
+        #       ↓
+        #   huge LLM request
+        #       ↓
+        #   Groq 413 / rate limit
+        #       ↓
+        #   semantic-search fallback
+        #
+        # It also guarantees that actions such as
+        # generate_reply, approve_draft, reject_draft,
+        # send_reply, and rewrite_reply are not converted
+        # into ordinary retrieval requests because of an
+        # unrelated LLM failure.
+        # ==================================================
 
-            return QueryPlan(
+        if draft_action:
+
+            plan = QueryPlan(
                 intent="semantic_search",
                 semantic_query=question,
+                email_reference=email_reference,
                 reasoning=(
-                    "Fallback retrieval plan generated "
-                    "after planner failure."
+                    "Deterministic action detected; "
+                    "LLM planning bypassed."
+                ),
+                needs_tool=True,
+                tool_name=draft_action,
+                tool_arguments=dict(
+                    draft_action_arguments
                 ),
             )
 
-        # ==================================================
-        # 4. BASIC NORMALIZATION
-        # ==================================================
-        # ==================================================
-# 3.5. DETERMINISTIC DRAFT ACTION OVERRIDE
-# ==================================================
-
-        if draft_action:
-            plan.needs_tool = True
-            plan.tool_name = draft_action
-            plan.tool_arguments = dict(
-        draft_action_arguments
-    )
-
-            plan.needs_clarification = False
-            plan.clarification_message = None
-
             logger.debug(
-        "Using deterministic draft action plan: %s",
-        plan.model_dump(),
+                "Using deterministic action plan "
+                "without LLM: %s",
+                plan.model_dump(),
+            )
+
+        else:
+
+            # ==================================================
+            # 4. BUILD HISTORY
+            # ==================================================
+            
+            # ==================================================
+# 4. BUILD COMPACT HISTORY
+# ==================================================
+
+            history_str = "No previous conversation history."
+
+            if conversation:
+
+                history_parts: list[str] = []
+
+    # Only the most recent few messages are useful for
+    # resolving conversational context.
+                recent_messages = conversation[-6:]
+
+                for message in recent_messages:
+
+                    role = message.get(
+            "role",
+            "user",
+        )
+
+                    content = message.get(
+            "message",
+            message.get(
+                "content",
+                "",
+            ),
+        )
+
+        # Prevent huge assistant responses from entering
+        # the planner prompt.
+                    if content:
+
+                        content = str(content).strip()
+
+                        if len(content) > 1000:
+
+                            content = content[:1000] + "..."
+
+                    history_parts.append(
+            f"{str(role).capitalize()}: {content}"
+        )
+
+                    metadata = message.get(
+            "metadata",
+            {},
+        )
+
+        # Only pass the small structured fields that
+        # actually matter for planning.
+                    if isinstance(metadata, dict):
+
+                        compact_metadata = {}
+
+                        for key in (
+                "tool",
+                "action",
+                "email_id",
+                "draft_id",
+            ):  
+                            
+
+                            value = metadata.get(key)
+
+                            if value is not None:
+
+                                compact_metadata[key] = value
+
+                        if compact_metadata:
+
+                            history_parts.append(
+                    "Structured metadata: "
+                    f"{compact_metadata}"
+                )
+
+                history_str = "\n".join(
+        history_parts
     )
 
-    
+            # ==================================================
+            # 5. CALL LLM
+            # ==================================================
+
+            llm_instance = get_llm()
+
+            chain = (
+                self.prompt.partial(
+                    format_instructions=(
+                        self.parser.get_format_instructions()
+                    )
+                )
+                | llm_instance
+                | self.parser
+            )
+
+            try:
+
+                plan: QueryPlan = await chain.ainvoke(
+                    {
+                        "question": question,
+                        "conversation_history": history_str,
+                    }
+                )
+
+            except Exception:
+
+                logger.exception(
+                    "Failed to parse QueryPlan."
+                )
+
+                return QueryPlan(
+                    intent="semantic_search",
+                    semantic_query=question,
+                    reasoning=(
+                        "Planner LLM failed. "
+                        "No deterministic action was detected."
+                    ),
+                )
+
         # ==================================================
-# 4. BASIC NORMALIZATION
-# ==================================================
+        # 6. BASIC NORMALIZATION
+        # ==================================================
 
         plan.reasoning = (
-    plan.reasoning or ""
-)
+            plan.reasoning or ""
+        )
 
         plan.tool_arguments = (
-    plan.tool_arguments or {}
-)
+            plan.tool_arguments or {}
+        )
 
-# --------------------------------------------------
-# Natural-language email reference
-# --------------------------------------------------
+        # --------------------------------------------------
+        # Natural-language email reference
+        # --------------------------------------------------
 
         if email_reference:
-            plan.email_reference = email_reference
-            plan.tool_arguments["email_reference"] = (
-        email_reference
-    )
+
+            plan.email_reference = (
+                email_reference
+            )
+
+            plan.tool_arguments[
+                "email_reference"
+            ] = email_reference
 
         # ==================================================
-        # 5. SEMANTIC NORMALIZATION
+        # 7. SEMANTIC NORMALIZATION
         # ==================================================
 
         if not plan.semantic_query:
@@ -1051,6 +903,7 @@ reasoning must always be present.
                 "high",
                 "urgent",
             }:
+
                 plan.priority = None
 
         if plan.category:
@@ -1063,17 +916,23 @@ reasoning must always be present.
                 c.value
                 for c in EmailCategory
             }:
+
                 plan.category = None
 
         if plan.sender:
-            plan.sender = plan.sender.strip()
+
+            plan.sender = (
+                plan.sender.strip()
+            )
 
         if plan.date_from:
+
             plan.date_from = (
                 plan.date_from.strip()
             )
 
         if plan.date_to:
+
             plan.date_to = (
                 plan.date_to.strip()
             )
@@ -1091,22 +950,25 @@ reasoning must always be present.
             "date",
             "priority",
         }:
+
             plan.sort_by = "relevance"
 
         if (
             plan.intent == "summarize"
             and plan.retrieve_limit < 20
         ):
+
             plan.retrieve_limit = 20
 
         if (
             plan.intent == "deadline_search"
             and plan.sort_by != "date"
         ):
+
             plan.sort_by = "date"
 
         # ==================================================
-        # 6. VALIDATE / NORMALIZE TOOL
+        # 8. VALIDATE / NORMALIZE TOOL
         # ==================================================
 
         valid_tools = {
@@ -1137,7 +999,7 @@ reasoning must always be present.
                 plan.tool_arguments = {}
 
         # ==================================================
-        # 7. RESOLVE IDs
+        # 9. RESOLVE IDS
         #
         # Explicit current-message IDs ALWAYS win.
         # ==================================================
@@ -1173,7 +1035,7 @@ reasoning must always be present.
             )
 
         # ==================================================
-        # 8. NORMALIZE IDS
+        # 10. NORMALIZE IDS
         #
         # IMPORTANT:
         # This happens BEFORE required validation.
@@ -1229,9 +1091,9 @@ reasoning must always be present.
 
                     if normalized_id > 0:
 
-                        plan.tool_arguments[key] = (
-                            normalized_id
-                        )
+                        plan.tool_arguments[
+                            key
+                        ] = normalized_id
 
                     else:
 
@@ -1255,7 +1117,7 @@ reasoning must always be present.
                 )
 
         # ==================================================
-        # 9. NORMALIZE TONE
+        # 11. NORMALIZE TONE
         # ==================================================
 
         if plan.tool_name == "generate_reply":
@@ -1277,12 +1139,13 @@ reasoning must always be present.
                 )
 
                 if not tone:
+
                     tone = "professional"
 
             plan.tool_arguments["tone"] = tone
 
         # ==================================================
-        # 10. NORMALIZE REWRITE INSTRUCTION
+        # 12. NORMALIZE REWRITE INSTRUCTION
         # ==================================================
 
         if plan.tool_name == "rewrite_reply":
@@ -1319,7 +1182,7 @@ reasoning must always be present.
                 )
 
         # ==================================================
-        # 11. REQUIRED ARGUMENTS
+        # 13. REQUIRED ARGUMENTS
         # ==================================================
 
         required_tool_arguments = {
@@ -1363,12 +1226,11 @@ reasoning must always be present.
             ],
         }
 
-                # ==================================================
-        # 12. VALIDATE REQUIRED ARGUMENTS
+        # ==================================================
+        # 14. VALIDATE REQUIRED ARGUMENTS
         # ==================================================
 
         if plan.needs_tool:
-            
 
             required = (
                 required_tool_arguments.get(
@@ -1399,10 +1261,11 @@ reasoning must always be present.
                 #
                 #   email_reference
                 #
-                # The ChatAgent resolves email_reference -> email_id.
+                # The ChatAgent resolves
+                # email_reference -> email_id.
                 #
-                # Therefore the planner MUST NOT ask the user for
-                # email_id when an email_reference is available.
+                # Therefore the planner MUST NOT ask the user
+                # for email_id when an email_reference is available.
                 # --------------------------------------------------
 
                 if (
@@ -1412,6 +1275,7 @@ reasoning must always be present.
                         "email_reference"
                     )
                 ):
+
                     continue
 
                 if value is None:
@@ -1428,7 +1292,7 @@ reasoning must always be present.
                     missing.append(argument)
 
             # ==================================================
-            # 13. CLARIFICATION
+            # 15. CLARIFICATION
             # ==================================================
 
             if missing:
@@ -1479,7 +1343,7 @@ reasoning must always be present.
                 plan.tool_arguments = {}
 
         # ==================================================
-        # 14. FINAL LOGGING
+        # 16. FINAL LOGGING
         # ==================================================
 
         logger.debug(

@@ -235,6 +235,8 @@ function normalizeAssistantMessage(
   const tool =
     getTool(data);
 
+  // FIX: Only omit retrieved emails for draft actions. 
+  // Do NOT restrict them just because message content exists.
   const retrievedEmails = isDraftAction(tool)
     ? []
     : getRetrievedEmails(data)
@@ -243,6 +245,7 @@ function normalizeAssistantMessage(
           (email) =>
             email?.id != null
         );
+
 
   // ============================================================
   // Normalize the draft/tool action ONCE.
@@ -651,6 +654,7 @@ export default function useChat() {
                           (email) =>
                             email?.id != null
                         );
+
 
 
                 const toolResult =

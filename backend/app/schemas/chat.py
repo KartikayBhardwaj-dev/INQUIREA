@@ -33,11 +33,17 @@ class ChatMessage(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
+    id: int | str | None = None
     role: str
-
     content: str
-
-    created_at: datetime
+    created_at: datetime | None = None
+    
+    # Add these fields to preserve tool states and retrieved emails in history:
+    retrieved_emails: list[RetrievedEmail] = Field(default_factory=list)
+    tool: str | None = None
+    tool_result: dict[str, Any] | None = None
+    query_plan: dict[str, Any] = Field(default_factory=dict)
+    error: dict[str, Any] | None = None
 
 
 class ConversationHistory(BaseModel):

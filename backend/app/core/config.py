@@ -5,7 +5,10 @@ from pydantic_settings import (
     SettingsConfigDict,
 )
 from pathlib import Path
+from dotenv import load_dotenv
+from pathlib import Path
 
+load_dotenv(Path(__file__).resolve().parents[3] / ".env")
 class EmailCategory(str, Enum):
     OPPORTUNITY = "opportunity"
     DEADLINE = "deadline"
@@ -78,7 +81,13 @@ class Settings(BaseSettings):
     LLM_MAX_CONCURRENT_LIMIT: int = 10
     LLM_ENABLE_ADAPTIVE_CONCURRENCY: bool = True
     GROQ_API_KEY: str | None = None
-
+        # ----------------------------------------
+    # LangSmith Tracing
+    # ----------------------------------------
+    LANGCHAIN_TRACING_V2: bool = False
+    LANGCHAIN_API_KEY: str | None = None
+    LANGCHAIN_PROJECT: str = "INQUIREA"
+    LANGCHAIN_ENDPOINT: str = "https://api.smith.langchain.com"
     # ----------------------------------------
     # Celery
     # ----------------------------------------

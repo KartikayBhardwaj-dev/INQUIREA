@@ -54,7 +54,7 @@ export async function getEmailDetails(
 ) {
   const response =
     await api.get(
-      `/emails/${gmailMessageId}`
+      `/gmail/email/${gmailMessageId}`
     );
 
   return response.data;
