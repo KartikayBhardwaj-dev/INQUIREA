@@ -41,34 +41,38 @@ class ChatRetriever:
         return {row.email_id: row for row in intelligence_rows}
 
     def retrieve(
-        self,
-        query: str,
-        limit: int = 5,
-        user_id: Optional[int] = None,
-        category: Optional[str] = None,
-        priority: Optional[str] = None,
-        sender: Optional[str] = None,
-        requires_reply: Optional[bool] = None,
-        sort_by: str = "relevance",
-        date_from=None,
-        date_to=None,
-    ) -> list[Email]:
+    self,
+    query: str,
+    limit: int = 5,
+    user_id: Optional[int] = None,
+    category: Optional[str] = None,
+    priority: Optional[str] = None,
+    sender: Optional[str] = None,
+    email_reference: Optional[str] = None,
+    requires_reply: Optional[bool] = None,
+    sort_by: str = "relevance",
+    date_from=None,
+    date_to=None,
+    filter_operator: str = "AND",
+) -> list[Email]:
         """
         Production semantic retrieval with SQL metadata filtering.
         """
         try:
             return self.repository.similarity_search(
-                query=query,
-                limit=limit,
-                user_id=user_id,
-                category=category,
-                priority=priority,
-                sender=sender,
-                requires_reply=requires_reply,
-                date_from=date_from,
-                date_to=date_to,
-                sort_by=sort_by,
-            )
+    query=query,
+    limit=limit,
+    user_id=user_id,
+    category=category,
+    priority=priority,
+    sender=sender,
+    email_reference=email_reference,
+    requires_reply=requires_reply,
+    date_from=date_from,
+    date_to=date_to,
+    sort_by=sort_by,
+    filter_operator=filter_operator,
+)
         except Exception:
             logger.exception("Error during semantic chat retrieval for query: '%s'", query)
             return []

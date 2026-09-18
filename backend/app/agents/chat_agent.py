@@ -142,6 +142,7 @@ class ChatAgent:
             question=question,
             conversation=conversation,
             plan=plan,
+            user_id=user_id,
         )
 
     async def _handle_tool_request(
@@ -553,6 +554,7 @@ class ChatAgent:
         question: str,
         conversation: list[dict[str, Any]],
         plan: QueryPlan,
+        user_id: int | None = None,
     ) -> dict[str, Any]:
 
         search_query = (
@@ -563,6 +565,7 @@ class ChatAgent:
         emails = self._retrieve_emails(
             search_query,
             plan,
+            user_id=user_id,
         )
 
         if emails is None:
@@ -603,30 +606,35 @@ class ChatAgent:
         )
 
     def _retrieve_emails(
-        self,
-        search_query: str,
-        plan: QueryPlan,
-    ) -> list[Any] | None:
+    self,
+    search_query: str,
+    plan: QueryPlan,
+    user_id: int | None = None,
+) -> list[Any] | None:
+        
 
         try:
 
             return self.retriever.retrieve(
-                query=search_query,
-                limit=plan.retrieve_limit,
-                category=plan.category,
-                priority=plan.priority,
-                sender=plan.sender,
-                requires_reply=plan.requires_reply,
-                sort_by=plan.sort_by,
-                date_from=plan.date_from,
-                date_to=plan.date_to,
-            )
+    query=search_query,
+    limit=plan.retrieve_limit,
+    user_id=user_id,
+    category=plan.category,
+    priority=plan.priority,
+    sender=plan.sender,
+    email_reference=plan.email_reference,
+    requires_reply=plan.requires_reply,
+    sort_by=plan.sort_by,
+    date_from=plan.date_from,
+    date_to=plan.date_to,
+    filter_operator=plan.filter_operator,
+)
 
         except Exception:
 
             logger.exception(
-                "Email retrieval failed."
-            )
+            "Email retrieval failed."
+        )
 
             return None
 
@@ -786,6 +794,7 @@ Output ONLY the direct response to the user.
             question=question,
             conversation=conversation,
             email_data=email_data,
+            intent=getattr(plan, "intent", None),
         )
 
         llm = get_llm()

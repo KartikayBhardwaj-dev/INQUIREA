@@ -39,7 +39,7 @@ class QueryPlan(BaseModel):
     sender: str | None = None
 
     requires_reply: bool | None = None
-
+    filter_operator: Literal["AND", "OR"] = "AND"
     retrieve_limit: int = Field(
         default=5,
         ge=1,
@@ -211,7 +211,56 @@ For summarize, retrieve_limit should normally be 20.
 
 For sender_lookup and deadline_search, retrieve_limit
 should normally be 10.
+========================================================
+FILTER COMBINATION LOGIC
+========================================================
 
+When multiple filters are present, determine how the
+user wants them combined.
+
+Use:
+
+- AND when the user says:
+  - "and"
+  - "both"
+  - "all"
+  - "that are X and Y"
+  - "emails that are X as well as Y"
+
+- OR when the user says:
+  - "or"
+  - "either"
+  - "either X or Y"
+  - "X or Y"
+  - "emails that meet either condition"
+
+Examples:
+
+User:
+"Show emails that require a reply and are high priority"
+
+priority = "high"
+requires_reply = true
+filter_operator = "AND"
+
+User:
+"Show emails that require a reply or are high priority"
+
+priority = "high"
+requires_reply = true
+filter_operator = "OR"
+
+User:
+"Show high priority emails"
+
+priority = "high"
+filter_operator = "AND"
+
+If only one filter is present, filter_operator should be
+"AND" because it has no practical effect.
+
+Never assume AND merely because multiple filters exist.
+Use the user's explicit conjunction.
 ========================================================
 FILTERS
 ========================================================
@@ -341,20 +390,24 @@ reasoning must always be present.
         return context
 
     def _extract_email_reference(
-        self,
-        question: str,
-    ) -> str | None:
+    self,
+    question: str,
+) -> str | None:
 
-        match = re.search(
-            r'\bemail\b'
-            r'(?:\s+(?:titled|called|named))?'
-            r'\s*["\']([^"\']+)["\']',
-            question,
-            re.IGNORECASE,
-        )
+        quoted_match = re.search(
+        r'\bemail\b'
+        r'(?:\s+(?:titled|called|named))?'
+        r'\s*["\']([^"\']+)["\']',
+        question,
+        re.IGNORECASE,
+    )
 
-        if match:
-            return match.group(1).strip()
+        if quoted_match:
+
+            reference = quoted_match.group(1).strip()
+
+            if reference:
+                return reference
 
         return None
 
@@ -624,6 +677,12 @@ reasoning must always be present.
         email_reference = self._extract_email_reference(
             question
         )
+        logger.warning(
+    "PLANNER EMAIL REFERENCE DEBUG | "
+    "question=%r | extracted_email_reference=%r",
+    question,
+    email_reference,
+)
 
         logger.debug(
             "Planner context: %s",
@@ -952,7 +1011,12 @@ reasoning must always be present.
         }:
 
             plan.sort_by = "relevance"
-
+        if plan.filter_operator not in {
+    "AND",
+    "OR",
+}:
+            
+            plan.filter_operator = "AND"
         if (
             plan.intent == "summarize"
             and plan.retrieve_limit < 20
@@ -1346,9 +1410,8 @@ reasoning must always be present.
         # 16. FINAL LOGGING
         # ==================================================
 
-        logger.debug(
-            "Final normalized QueryPlan: %s",
-            plan.model_dump(),
-        )
-
+        logger.warning(
+    "FINAL QUERY PLAN DEBUG | %s",
+    plan.model_dump(),
+)
         return plan
