@@ -7,7 +7,7 @@ from backend.app.core.config import get_settings
 
 from backend.app.tools.bootstrap import register_tools
 from backend.app.agents.bootstrap import register_agents
-
+from backend.app.api.health import router as health_router
 from backend.app.api.auth import (
     router as auth_router,
 )
@@ -61,7 +61,9 @@ register_agents()
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000"
+        origin.strip()
+        for origin in settings.CORS_ORIGINS.split(",")
+        if origin.strip()
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -81,5 +83,5 @@ app.include_router(gmail_router)
 app.include_router(email_intelligence_router)
 app.include_router(agent_router)
 app.include_router(chat_router)
-
+app.include_router(health_router)
 print("✓ Inquirea started successfully")
