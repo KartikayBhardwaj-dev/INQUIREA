@@ -40,7 +40,6 @@ htmlcov/
 
 .env
 .env.*
-
 !.env.example
 
 instance/
@@ -57,28 +56,34 @@ logs/
 # Redis
 dump.rdb
 
-# Alembic cache
-alembic/__pycache__/
-
 # =====================================================
 # Node / Frontend
 # =====================================================
 
 frontend/node_modules/
+frontend/.next/
 frontend/dist/
 frontend/.vite/
+frontend/out/
 frontend/coverage/
 
-# Environment
+# Frontend Environment
 frontend/.env
 frontend/.env.*
 !frontend/.env.example
 
-# npm
+# npm / Yarn / pnpm logs
 frontend/npm-debug.log*
 frontend/yarn-debug.log*
 frontend/yarn-error.log*
 frontend/pnpm-debug.log*
+
+# Vercel
+frontend/.vercel/
+
+# TypeScript / Next.js generated files
+frontend/*.tsbuildinfo
+frontend/next-env.d.ts
 
 # =====================================================
 # IDE
@@ -89,12 +94,12 @@ frontend/pnpm-debug.log*
 
 *.swp
 *.swo
-.DS_Store
 
 # =====================================================
 # macOS
 # =====================================================
 
+.DS_Store
 .AppleDouble
 .LSOverride
 Icon?
@@ -111,7 +116,7 @@ temp/
 tmp/
 
 # =====================================================
-# Secrets
+# Secrets / Certificates
 # =====================================================
 
 *.pem
@@ -119,7 +124,7 @@ tmp/
 *.crt
 
 # =====================================================
-# Optional
+# Backup Files
 # =====================================================
 
 *.bak
